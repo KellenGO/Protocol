@@ -1,73 +1,55 @@
-# React + TypeScript + Vite
+# Protocol
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+基于 CTDP（Chain Time-Delay Protocol）方法论的自控协议桌面应用。
 
-Currently, two official plugins are available:
+## 技术栈
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **桌面框架**：Tauri 2
+- **前端**：React 19 + TypeScript + Vite
+- **数据库**：SQLite (rusqlite)
+- **样式**：CSS 自定义（无第三方 UI 库）
 
-## React Compiler
+## 开发
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 前置条件
 
-## Expanding the ESLint configuration
+- Node.js + npm
+- Rust 工具链 (MSVC)
+- Microsoft Visual C++ Build Tools
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### 命令
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install          # 安装前端依赖
+npm run dev          # 前端开发（浏览器预览）
+npm run tauri dev    # Tauri 桌面应用开发
+npm run build        # 前端构建
+npm run tauri build  # Tauri 打包
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### 项目结构
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+src/
+├── components/       # 共享组件（Sidebar）
+├── features/ctdp/    # CTDP 业务组件
+├── lib/db/           # 数据库调用 + Schema 文档
+├── pages/            # 页面组件
+├── styles/           # 全局样式
+└── types/            # TypeScript 类型定义
+src-tauri/
+├── src/              # Rust 源码（db, lib, main）
+├── Cargo.toml
+└── tauri.conf.json
+```
+
+## V1 功能
+
+- 主链管理（创建、列表、详情、判例库）
+- 正式任务执行（倒计时、完成、中途失败裁决）
+- 预约启动（倒计时、到期履约、失败裁决）
+- 全局活跃协议互斥
+- Dashboard 首页（统计 + 活跃状态 + 最近活动）
+- 历史记录（统一事件流 + 类型/结果/主链筛选）
+- 可编辑默认设置
+- 明/暗主题（跟随系统）
