@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import GlobalFocusButton from './components/GlobalFocusButton';
 import Dashboard from './pages/Dashboard';
 import ChainList from './pages/ChainList';
 import ChainDetail from './pages/ChainDetail';
@@ -14,6 +15,7 @@ export default function App() {
     <BrowserRouter>
       <div className="app-layout">
         <Sidebar />
+        <GlobalFocusButton />
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />

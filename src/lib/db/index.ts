@@ -65,6 +65,17 @@ export async function createChain(params: {
   return invoke('create_chain', params);
 }
 
+export async function updateChain(
+  id: number,
+  params: {
+    name: string;
+    description: string;
+    focusDurationMinutes: number;
+  },
+): Promise<Chain> {
+  return invoke('update_chain', { id, ...params });
+}
+
 export async function getChain(id: number): Promise<Chain> {
   return invoke('get_chain', { id });
 }

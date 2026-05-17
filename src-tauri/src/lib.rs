@@ -54,6 +54,53 @@ fn create_chain(
 }
 
 #[tauri::command]
+fn update_chain(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    name: String,
+    description: String,
+    focus_duration_minutes: i64,
+) -> Result<serde_json::Value, String> {
+    if name.trim().is_empty() {
+        return Err("主链名称不能为空".into());
+    }
+    if focus_duration_minutes < 1 {
+        return Err("专注时长必须为正整数".into());
+    }
+
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let rows = conn
+        .execute(
+            "UPDATE chains SET name = ?1, description = ?2, focus_duration_minutes = ?3, updated_at = datetime('now') WHERE id = ?4",
+            rusqlite::params![name.trim(), description.trim(), focus_duration_minutes, id],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if rows == 0 {
+        return Err("链不存在".into());
+    }
+
+    conn.query_row(
+        "SELECT id, name, description, focus_duration_minutes, current_length, best_length, status, created_at, updated_at FROM chains WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "description": row.get::<_, String>(2)?,
+                "focus_duration_minutes": row.get::<_, i64>(3)?,
+                "current_length": row.get::<_, i64>(4)?,
+                "best_length": row.get::<_, i64>(5)?,
+                "status": row.get::<_, String>(6)?,
+                "created_at": row.get::<_, String>(7)?,
+                "updated_at": row.get::<_, String>(8)?,
+            }))
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_chain(state: tauri::State<'_, Database>, id: i64) -> Result<serde_json::Value, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row(
@@ -996,12 +1043,12 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
         .map_err(|e| e.to_string())?;
 
     let active_focus: Option<(i64, String)> = conn.query_row(
-        "SELECT f.id, c.name FROM focus_sessions f JOIN chains c ON c.id = f.chain_id WHERE f.result IS NULL LIMIT 1",
+        "SELECT f.chain_id, c.name FROM focus_sessions f JOIN chains c ON c.id = f.chain_id WHERE f.result IS NULL LIMIT 1",
         [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
     ).ok();
 
     let active_reservation: Option<(i64, String, String)> = conn.query_row(
-        "SELECT r.id, c.name, r.due_at FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id WHERE r.result IS NULL LIMIT 1",
+        "SELECT r.chain_id, c.name, r.due_at FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id WHERE r.result IS NULL LIMIT 1",
         [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
     ).ok();
 
@@ -1168,6 +1215,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_db_status,
             create_chain,
+            update_chain,
             get_chain,
             get_chains,
             get_global_active_focus_session,

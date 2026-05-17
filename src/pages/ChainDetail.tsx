@@ -1,31 +1,51 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getChain, startFocusSession, getGlobalActiveFocusSession, getGlobalActiveReservationSession, getChainPrecedents, getChainReservationPrecedents } from '../lib/db';
+import {
+  getChain,
+  startFocusSession,
+  getGlobalActiveFocusSession,
+  getGlobalActiveReservationSession,
+  getChainPrecedents,
+  getChainReservationPrecedents,
+} from '../lib/db';
+import EditChainForm from '../features/ctdp/EditChainForm';
 import type { Chain, ChainPrecedent } from '../types';
 
 export default function ChainDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const chainId = Number(id);
+
   const [chain, setChain] = useState<Chain | null>(null);
   const [precedents, setPrecedents] = useState<ChainPrecedent[]>([]);
   const [reservationPrecedents, setReservationPrecedents] = useState<ChainPrecedent[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [recoveryMsg, setRecoveryMsg] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [hasActiveFocusOnThisChain, setHasActiveFocusOnThisChain] = useState(false);
   const [error, setError] = useState('');
+  const [warnMsg, setWarnMsg] = useState('');
 
   useEffect(() => {
     if (!id) return;
-    const chainId = Number(id);
-    Promise.all([getChain(chainId), getChainPrecedents(chainId), getChainReservationPrecedents(chainId)])
-      .then(([c, p, rp]) => {
+    setLoading(true);
+    Promise.all([
+      getChain(chainId),
+      getChainPrecedents(chainId),
+      getChainReservationPrecedents(chainId),
+      getGlobalActiveFocusSession(),
+    ])
+      .then(([c, p, rp, globalFocus]) => {
         setChain(c);
         setPrecedents(p);
         setReservationPrecedents(rp);
+        setHasActiveFocusOnThisChain(
+          globalFocus !== null && globalFocus.chain_id === chainId,
+        );
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [chainId]);
 
   if (loading) {
     return (
@@ -46,8 +66,25 @@ export default function ChainDetail() {
     );
   }
 
-  const statusLabel =
-    chain.status === 'active' ? '活跃' : '已归档';
+  if (editing) {
+    return (
+      <div className="page">
+        <button className="btn-back" onClick={() => setEditing(false)}>
+          ← 返回详情
+        </button>
+        <EditChainForm
+          chain={chain}
+          onUpdated={(updated) => {
+            setChain(updated);
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      </div>
+    );
+  }
+
+  const statusLabel = chain.status === 'active' ? '活跃' : '已归档';
 
   return (
     <div className="page">
@@ -57,14 +94,10 @@ export default function ChainDetail() {
 
       <div className="detail-header">
         <h2>{chain.name}</h2>
-        <span className={`status-badge status-${chain.status}`}>
-          {statusLabel}
-        </span>
+        <span className={`status-badge status-${chain.status}`}>{statusLabel}</span>
       </div>
 
-      {chain.description && (
-        <p className="detail-desc">{chain.description}</p>
-      )}
+      {chain.description && <p className="detail-desc">{chain.description}</p>}
 
       <div className="detail-grid">
         <div className="detail-item">
@@ -88,45 +121,63 @@ export default function ChainDetail() {
       </div>
 
       <div className="detail-actions">
-        {recoveryMsg && <p className="recovery-msg">{recoveryMsg}</p>}
-        <button
-          className="btn btn-primary"
-          disabled={starting}
-          onClick={async () => {
-            if (!chain) return;
-            setStarting(true);
-            setRecoveryMsg('');
-            setError('');
-            try {
-              const globalFocus = await getGlobalActiveFocusSession();
-              if (globalFocus) {
-                setRecoveryMsg(
-                  `已有进行中的正式任务（链「${globalFocus.chain_name}」），已为你恢复。`,
-                );
-                navigate(`/chains/${globalFocus.chain_id}/focus`);
-                return;
-              }
-
-              const globalReservation = await getGlobalActiveReservationSession();
-              if (globalReservation) {
-                setError(
-                  `当前已有进行中的预约（链「${globalReservation.chain_name}」），请先处理该预约。`,
-                );
-                return;
-              }
-
-              await startFocusSession(chain.id, chain.focus_duration_minutes);
-              navigate(`/chains/${chain.id}/focus`);
-            } catch (err) {
-              setError(String(err));
-            } finally {
-              setStarting(false);
-            }
-          }}
-        >
-          {starting ? '正在启动…' : '开始正式任务'}
-        </button>
+        {warnMsg && <p className="action-warn">{warnMsg}</p>}
         {error && <p className="action-error">{error}</p>}
+
+        {hasActiveFocusOnThisChain ? (
+          <button
+            className="btn btn-primary"
+            onClick={() => navigate(`/chains/${chain.id}/focus`)}
+          >
+            回到专注
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary"
+            disabled={starting}
+            onClick={async () => {
+              if (!chain) return;
+              setStarting(true);
+              setWarnMsg('');
+              setError('');
+              try {
+                const globalFocus = await getGlobalActiveFocusSession();
+                if (globalFocus) {
+                  setWarnMsg(
+                    `⚠️ 已有任务在进行：${globalFocus.chain_name}`,
+                  );
+                  return;
+                }
+
+                const globalReservation = await getGlobalActiveReservationSession();
+                if (globalReservation) {
+                  setError(
+                    `当前已有进行中的预约（链「${globalReservation.chain_name}」），请先处理该预约。`,
+                  );
+                  return;
+                }
+
+                await startFocusSession(chain.id, chain.focus_duration_minutes);
+                setHasActiveFocusOnThisChain(true);
+                navigate(`/chains/${chain.id}/focus`);
+              } catch (err) {
+                setError(String(err));
+              } finally {
+                setStarting(false);
+              }
+            }}
+          >
+            {starting ? '正在启动…' : '开始正式任务'}
+          </button>
+        )}
+
+        <button
+          className="btn btn-secondary"
+          style={{ marginLeft: 8 }}
+          onClick={() => setEditing(true)}
+        >
+          编辑主链
+        </button>
       </div>
 
       <div className="precedents-section">
@@ -143,9 +194,7 @@ export default function ChainDetail() {
                     {new Date(p.created_at + 'Z').toLocaleDateString('zh-CN')}
                   </span>
                 </div>
-                {p.description && (
-                  <p className="precedent-item-desc">{p.description}</p>
-                )}
+                {p.description && <p className="precedent-item-desc">{p.description}</p>}
               </div>
             ))}
           </div>
@@ -166,9 +215,7 @@ export default function ChainDetail() {
                     {new Date(p.created_at + 'Z').toLocaleDateString('zh-CN')}
                   </span>
                 </div>
-                {p.description && (
-                  <p className="precedent-item-desc">{p.description}</p>
-                )}
+                {p.description && <p className="precedent-item-desc">{p.description}</p>}
               </div>
             ))}
           </div>

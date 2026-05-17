@@ -676,6 +676,41 @@ body {
   line-height: 1.5;
 }
 
+.action-warn {
+  font-size: 13px;
+  color: #b86e00;
+  background: rgba(200, 150, 50, 0.08);
+  border: 1px solid rgba(200, 150, 50, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+/* ===== Global Focus Button ===== */
+
+.global-focus-btn {
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  z-index: 100;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid rgba(68, 170, 136, 0.4);
+  background: rgba(68, 170, 136, 0.1);
+  color: var(--success);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.global-focus-btn:hover {
+  background: rgba(68, 170, 136, 0.2);
+  border-color: var(--success);
+}
+
 /* ===== Focus Session ===== */
 
 .focus-header {
