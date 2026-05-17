@@ -26,5 +26,9 @@ dist-ssr
 # Rust build output
 src-tauri/target
 
+# Build outputs
+Protocol.exe
+Protocol_*.msi
+
 # Claude
 .claude
