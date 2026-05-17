@@ -29,6 +29,7 @@ src-tauri/target
 # Build outputs
 Protocol.exe
 Protocol_*.msi
+Protocol_*-setup.exe
 
 # Claude
 .claude
