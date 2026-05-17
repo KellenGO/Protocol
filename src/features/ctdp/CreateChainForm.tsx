@@ -42,7 +42,7 @@ export default function CreateChainForm({ onCreated, onCancel }: Props) {
       const chain = await createChain({
         name: name.trim(),
         description: description.trim(),
-        focus_duration_minutes: focusDuration,
+        focusDurationMinutes: focusDuration,
       });
       onCreated(chain);
     } catch (err) {

@@ -60,7 +60,7 @@ export async function getProtocolHistory(filter: {
 export async function createChain(params: {
   name: string;
   description: string;
-  focus_duration_minutes: number;
+  focusDurationMinutes: number;
 }): Promise<Chain> {
   return invoke('create_chain', params);
 }
