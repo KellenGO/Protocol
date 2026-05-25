@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getDashboardSummary, getRecentProtocolEvents } from '../lib/db';
-import type { DashboardSummary, ProtocolEvent } from '../types';
+import { getDashboardSummary, getRecentProtocolEvents, getRsipSummary } from '../lib/db';
+import type { DashboardSummary, ProtocolEvent, RsipSummary } from '../types';
 
 function eventLabel(event: ProtocolEvent): string {
   if (event.event_type === 'focus') {
@@ -20,6 +20,14 @@ function eventTypeLabel(type: string): string {
   return type === 'focus' ? '正式任务' : '预约';
 }
 
+function rsipEventLabel(type: string): string {
+  if (type === 'created') return '加入定式树';
+  if (type === 'activated') return '点亮定式';
+  if (type === 'deactivated') return '熄灭定式';
+  if (type === 'rollback_child_deactivated') return '递归回滚';
+  return type;
+}
+
 function formatTime(raw: string): string {
   const d = new Date(raw + 'Z');
   const now = new Date();
@@ -33,13 +41,15 @@ function formatTime(raw: string): string {
 export default function Dashboard() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [rsipSummary, setRsipSummary] = useState<RsipSummary | null>(null);
   const [events, setEvents] = useState<ProtocolEvent[]>([]);
 
   useEffect(() => {
-    Promise.all([getDashboardSummary(), getRecentProtocolEvents()])
-      .then(([s, e]) => {
+    Promise.all([getDashboardSummary(), getRecentProtocolEvents(), getRsipSummary()])
+      .then(([s, e, r]) => {
         setSummary(s);
         setEvents(e);
+        setRsipSummary(r);
       })
       .catch(console.error);
   }, []);
@@ -85,6 +95,24 @@ export default function Dashboard() {
             )}
           </span>
         </div>
+        <div className="stat-card">
+          <span className="stat-label">RSIP 定式树</span>
+          <span className="stat-value">{rsipSummary?.total_formulas ?? '—'}</span>
+          <span className="stat-detail">
+            已点亮 {rsipSummary?.active_formulas ?? '—'} · 未点亮 {rsipSummary?.inactive_formulas ?? '—'}
+          </span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">最近 RSIP 状态</span>
+          <span className="stat-value stat-detail">
+            {rsipSummary?.latest_event
+              ? rsipEventLabel(rsipSummary.latest_event.event_type)
+              : '暂无定式事件'}
+          </span>
+          {rsipSummary?.latest_event && (
+            <span className="stat-detail">{rsipSummary.latest_event.formula_title}</span>
+          )}
+        </div>
       </div>
 
       {/* Active state action */}
@@ -118,6 +146,9 @@ export default function Dashboard() {
         </button>
         <button className="btn btn-secondary" onClick={() => navigate('/reservation')}>
           预约启动
+        </button>
+        <button className="btn btn-secondary" onClick={() => navigate('/rsip')}>
+          RSIP 定式树
         </button>
       </div>
 

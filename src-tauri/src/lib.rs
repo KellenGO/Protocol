@@ -1198,6 +1198,447 @@ fn get_protocol_history(
     Ok(events)
 }
 
+#[tauri::command]
+fn create_rsip_formula(
+    state: tauri::State<'_, Database>,
+    title: String,
+    description: String,
+    parent_id: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    if title.trim().is_empty() {
+        return Err("定式标题不能为空".into());
+    }
+
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    if let Some(pid) = parent_id {
+        let parent_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM rsip_formulas WHERE id = ?1",
+                [pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !parent_exists {
+            return Err("父定式不存在".into());
+        }
+    }
+
+    let next_position: i64 = if let Some(pid) = parent_id {
+        conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM rsip_formulas WHERE parent_id = ?1",
+            [pid],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM rsip_formulas WHERE parent_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?
+    };
+
+    conn.execute(
+        "INSERT INTO rsip_formulas (parent_id, title, description, position) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![parent_id, title.trim(), description.trim(), next_position],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO formula_events (formula_id, event_type, note) VALUES (?1, 'created', ?2)",
+        rusqlite::params![id, "定式已加入 RSIP 树"],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.query_row(
+        "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at FROM rsip_formulas WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "parent_id": row.get::<_, Option<i64>>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "description": row.get::<_, String>(3)?,
+                "status": row.get::<_, String>(4)?,
+                "position": row.get::<_, i64>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+                "activated_at": row.get::<_, Option<String>>(8)?,
+                "deactivated_at": row.get::<_, Option<String>>(9)?,
+            }))
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_rsip_formulas(state: tauri::State<'_, Database>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at
+             FROM rsip_formulas
+             ORDER BY COALESCE(parent_id, 0), position, created_at",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "parent_id": row.get::<_, Option<i64>>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "description": row.get::<_, String>(3)?,
+                "status": row.get::<_, String>(4)?,
+                "position": row.get::<_, i64>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+                "activated_at": row.get::<_, Option<String>>(8)?,
+                "deactivated_at": row.get::<_, Option<String>>(9)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut formulas = Vec::new();
+    for row in rows {
+        formulas.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(formulas)
+}
+
+#[tauri::command]
+fn activate_rsip_formula(
+    state: tauri::State<'_, Database>,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM rsip_formulas WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("定式不存在".into());
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE rsip_formulas
+         SET status = 'active', activated_at = datetime('now'), deactivated_at = NULL, updated_at = datetime('now')
+         WHERE id = ?1",
+        [id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO formula_events (formula_id, event_type, note) VALUES (?1, 'activated', ?2)",
+        rusqlite::params![id, "定式已点亮"],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+
+    conn.query_row(
+        "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at FROM rsip_formulas WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "parent_id": row.get::<_, Option<i64>>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "description": row.get::<_, String>(3)?,
+                "status": row.get::<_, String>(4)?,
+                "position": row.get::<_, i64>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+                "activated_at": row.get::<_, Option<String>>(8)?,
+                "deactivated_at": row.get::<_, Option<String>>(9)?,
+            }))
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn deactivate_rsip_formula(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    note: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM rsip_formulas WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        return Err("定式不存在".into());
+    }
+
+    let clean_note = note.unwrap_or_default().trim().to_string();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let active_descendants: Vec<i64> = {
+        let mut stmt = tx
+            .prepare(
+                "WITH RECURSIVE descendants(id) AS (
+                    SELECT id FROM rsip_formulas WHERE parent_id = ?1
+                    UNION ALL
+                    SELECT f.id FROM rsip_formulas f JOIN descendants d ON f.parent_id = d.id
+                )
+                SELECT id FROM rsip_formulas
+                WHERE id IN (SELECT id FROM descendants) AND status = 'active'
+                ORDER BY id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([id], |row| row.get::<_, i64>(0))
+            .map_err(|e| e.to_string())?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row.map_err(|e| e.to_string())?);
+        }
+        ids
+    };
+
+    tx.execute(
+        "UPDATE rsip_formulas
+         SET status = 'inactive', deactivated_at = datetime('now'), updated_at = datetime('now')
+         WHERE id = ?1",
+        [id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO formula_events (formula_id, event_type, note) VALUES (?1, 'deactivated', ?2)",
+        rusqlite::params![id, clean_note],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for child_id in active_descendants {
+        tx.execute(
+            "UPDATE rsip_formulas
+             SET status = 'inactive', deactivated_at = datetime('now'), updated_at = datetime('now')
+             WHERE id = ?1",
+            [child_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO formula_events (formula_id, event_type, note) VALUES (?1, 'rollback_child_deactivated', ?2)",
+            rusqlite::params![child_id, format!("父定式 {} 熄灭，触发递归回滚", id)],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at
+             FROM rsip_formulas
+             ORDER BY COALESCE(parent_id, 0), position, created_at",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "parent_id": row.get::<_, Option<i64>>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "description": row.get::<_, String>(3)?,
+                "status": row.get::<_, String>(4)?,
+                "position": row.get::<_, i64>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+                "activated_at": row.get::<_, Option<String>>(8)?,
+                "deactivated_at": row.get::<_, Option<String>>(9)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut formulas = Vec::new();
+    for row in rows {
+        formulas.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(formulas)
+}
+
+#[tauri::command]
+fn get_formula_events(
+    state: tauri::State<'_, Database>,
+    limit: Option<i64>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let safe_limit = limit.unwrap_or(20).clamp(1, 100);
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.id, e.formula_id, f.title, e.event_type, e.note, e.created_at
+             FROM formula_events e
+             JOIN rsip_formulas f ON f.id = e.formula_id
+             ORDER BY e.created_at DESC, e.id DESC
+             LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([safe_limit], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "formula_id": row.get::<_, i64>(1)?,
+                "formula_title": row.get::<_, String>(2)?,
+                "event_type": row.get::<_, String>(3)?,
+                "note": row.get::<_, String>(4)?,
+                "created_at": row.get::<_, String>(5)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(events)
+}
+
+#[tauri::command]
+fn get_rsip_summary(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let total_formulas: i64 = conn
+        .query_row("SELECT COUNT(*) FROM rsip_formulas", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    let active_formulas: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM rsip_formulas WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let inactive_formulas: i64 = total_formulas - active_formulas;
+    let latest_event = conn
+        .query_row(
+            "SELECT e.id, e.formula_id, f.title, e.event_type, e.note, e.created_at
+             FROM formula_events e
+             JOIN rsip_formulas f ON f.id = e.formula_id
+             ORDER BY e.created_at DESC, e.id DESC
+             LIMIT 1",
+            [],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "formula_id": row.get::<_, i64>(1)?,
+                    "formula_title": row.get::<_, String>(2)?,
+                    "event_type": row.get::<_, String>(3)?,
+                    "note": row.get::<_, String>(4)?,
+                    "created_at": row.get::<_, String>(5)?,
+                }))
+            },
+        )
+        .ok();
+
+    Ok(serde_json::json!({
+        "total_formulas": total_formulas,
+        "active_formulas": active_formulas,
+        "inactive_formulas": inactive_formulas,
+        "latest_event": latest_event,
+    }))
+}
+
+#[tauri::command]
+fn get_protocol_timeline(
+    state: tauri::State<'_, Database>,
+    type_filter: Option<String>,
+    result_filter: Option<String>,
+    chain_id: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let safe_limit = limit.unwrap_or(100).clamp(1, 300);
+
+    let mut sql = String::from(
+        "SELECT * FROM (
+            SELECT 'focus' AS event_type, f.id, f.chain_id, c.name AS chain_name,
+                   NULL AS formula_id, NULL AS formula_title,
+                   f.started_at AS event_time, f.ended_at, f.result, f.duration_minutes,
+                   f.failure_note AS note
+            FROM focus_sessions f JOIN chains c ON c.id = f.chain_id
+            WHERE f.result IS NOT NULL
+            UNION ALL
+            SELECT 'reservation' AS event_type, r.id, r.chain_id, c.name AS chain_name,
+                   NULL AS formula_id, NULL AS formula_title,
+                   r.created_at AS event_time, r.fulfilled_at AS ended_at, r.result, NULL AS duration_minutes,
+                   r.failure_note AS note
+            FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id
+            WHERE r.result IS NOT NULL
+            UNION ALL
+            SELECT 'rsip' AS event_type, e.id, NULL AS chain_id, NULL AS chain_name,
+                   e.formula_id, f.title AS formula_title,
+                   e.created_at AS event_time, NULL AS ended_at, e.event_type AS result, NULL AS duration_minutes,
+                   e.note AS note
+            FROM formula_events e JOIN rsip_formulas f ON f.id = e.formula_id
+        )",
+    );
+
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut filters = Vec::new();
+
+    if let Some(ref tf) = type_filter {
+        if matches!(tf.as_str(), "focus" | "reservation" | "rsip") {
+            filters.push(format!("event_type = '{}'", tf));
+        }
+    }
+    if let Some(ref rf) = result_filter {
+        if rf == "success" {
+            filters.push("result IN ('completed', 'fulfilled', 'activated', 'created')".to_string());
+        } else if rf == "failed" {
+            filters.push("result IN ('failed_reset', 'deactivated', 'rollback_child_deactivated')".to_string());
+        } else if rf == "precedent" {
+            filters.push("result IN ('failed_precedent')".to_string());
+        }
+    }
+    if let Some(cid) = chain_id {
+        params.push(Box::new(cid));
+        filters.push(format!("chain_id = ?{}", params.len()));
+    }
+
+    if !filters.is_empty() {
+        sql = format!("{} WHERE {}", sql, filters.join(" AND "));
+    }
+    params.push(Box::new(safe_limit));
+    sql = format!("{} ORDER BY event_time DESC, id DESC LIMIT ?{}", sql, params.len());
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(serde_json::json!({
+                "event_type": row.get::<_, String>(0)?,
+                "id": row.get::<_, i64>(1)?,
+                "chain_id": row.get::<_, Option<i64>>(2)?,
+                "chain_name": row.get::<_, Option<String>>(3)?,
+                "formula_id": row.get::<_, Option<i64>>(4)?,
+                "formula_title": row.get::<_, Option<String>>(5)?,
+                "event_time": row.get::<_, String>(6)?,
+                "ended_at": row.get::<_, Option<String>>(7)?,
+                "result": row.get::<_, String>(8)?,
+                "duration_minutes": row.get::<_, Option<i64>>(9)?,
+                "note": row.get::<_, Option<String>>(10)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(events)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1235,6 +1676,13 @@ pub fn run() {
             get_dashboard_summary,
             get_recent_protocol_events,
             get_protocol_history,
+            create_rsip_formula,
+            get_rsip_formulas,
+            activate_rsip_formula,
+            deactivate_rsip_formula,
+            get_formula_events,
+            get_rsip_summary,
+            get_protocol_timeline,
             get_setting,
             get_app_settings,
             update_app_setting,

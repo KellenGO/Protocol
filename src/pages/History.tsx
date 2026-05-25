@@ -1,23 +1,32 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getProtocolHistory, getChains } from '../lib/db';
-import type { Chain, ProtocolEvent } from '../types';
+import { getProtocolTimeline, getChains } from '../lib/db';
+import type { Chain, ProtocolTimelineEvent } from '../types';
 
-function eventLabel(event: ProtocolEvent): string {
+function eventLabel(event: ProtocolTimelineEvent): string {
   if (event.event_type === 'focus') {
-    if (event.result === 'completed') return '正式任务完成';
-    if (event.result === 'failed_reset') return '正式任务违规，主链清零';
-    if (event.result === 'failed_precedent') return '正式任务判例化';
-  } else {
-    if (event.result === 'fulfilled') return '预约已履约';
-    if (event.result === 'failed_reset') return '预约失败';
-    if (event.result === 'failed_precedent') return '预约判例化';
+    if (event.result === 'completed') return '协议节点完成，主链延续';
+    if (event.result === 'failed_reset') return '裁定违规，主链清零';
+    if (event.result === 'failed_precedent') return '裁定判例化，规则边界扩张';
+  }
+  if (event.event_type === 'reservation') {
+    if (event.result === 'fulfilled') return '预约履约，进入正式任务';
+    if (event.result === 'failed_reset') return '预约失败记录成立';
+    if (event.result === 'failed_precedent') return '预约情形判例化';
+  }
+  if (event.event_type === 'rsip') {
+    if (event.result === 'created') return '定式加入树';
+    if (event.result === 'activated') return '定式点亮';
+    if (event.result === 'deactivated') return '定式熄灭';
+    if (event.result === 'rollback_child_deactivated') return '递归回滚熄灭';
   }
   return event.result;
 }
 
 function eventTypeLabel(type: string): string {
-  return type === 'focus' ? '正式任务' : '预约';
+  if (type === 'focus') return '正式任务';
+  if (type === 'reservation') return '预约';
+  return 'RSIP';
 }
 
 function formatDateTime(raw: string): string {
@@ -26,7 +35,7 @@ function formatDateTime(raw: string): string {
 
 export default function History() {
   const navigate = useNavigate();
-  const [events, setEvents] = useState<ProtocolEvent[]>([]);
+  const [events, setEvents] = useState<ProtocolTimelineEvent[]>([]);
   const [chains, setChains] = useState<Chain[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
@@ -39,10 +48,11 @@ export default function History() {
 
   useEffect(() => {
     setLoading(true);
-    getProtocolHistory({
+    getProtocolTimeline({
       typeFilter,
       resultFilter,
       chainId: chainFilter,
+      limit: 150,
     })
       .then(setEvents)
       .catch(console.error)
@@ -63,6 +73,7 @@ export default function History() {
           <option value="">全部类型</option>
           <option value="focus">正式任务</option>
           <option value="reservation">预约</option>
+          <option value="rsip">RSIP</option>
         </select>
 
         <select
@@ -71,8 +82,8 @@ export default function History() {
           onChange={(e) => setResultFilter(e.target.value || null)}
         >
           <option value="">全部结果</option>
-          <option value="success">成功 / 履约</option>
-          <option value="failed">失败</option>
+          <option value="success">完成 / 履约 / 点亮</option>
+          <option value="failed">失败 / 熄灭 / 回滚</option>
           <option value="precedent">判例化</option>
         </select>
 
@@ -113,16 +124,26 @@ export default function History() {
                   {eventTypeLabel(e.event_type)}
                 </span>
                 <div className="history-item-info">
-                  <button
-                    className="history-chain-link"
-                    onClick={() => navigate(`/chains/${e.chain_id}`)}
-                  >
-                    {e.chain_name}
-                  </button>
+                  {e.event_type === 'rsip' ? (
+                    <button
+                      className="history-chain-link"
+                      onClick={() => navigate('/rsip')}
+                    >
+                      {e.formula_title ?? 'RSIP 定式'}
+                    </button>
+                  ) : (
+                    <button
+                      className="history-chain-link"
+                      onClick={() => e.chain_id && navigate(`/chains/${e.chain_id}`)}
+                    >
+                      {e.chain_name}
+                    </button>
+                  )}
                   <span className="history-event-time">
                     {formatDateTime(e.event_time)}
                     {e.ended_at && ` → ${formatDateTime(e.ended_at!)}`}
                   </span>
+                  {e.note && <span className="history-event-note">{e.note}</span>}
                 </div>
               </div>
               <span className={`history-result result-${e.result}`}>

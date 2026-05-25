@@ -124,8 +124,59 @@ export interface ProtocolEvent {
   duration_minutes: number | null;
 }
 
+export type FormulaStatus = 'inactive' | 'active';
+
+export type FormulaEventType =
+  | 'created'
+  | 'activated'
+  | 'deactivated'
+  | 'rollback_child_deactivated';
+
+export interface RsipFormula {
+  id: number;
+  parent_id: number | null;
+  title: string;
+  description: string;
+  status: FormulaStatus;
+  position: number;
+  created_at: string;
+  updated_at: string;
+  activated_at: string | null;
+  deactivated_at: string | null;
+}
+
+export interface FormulaEvent {
+  id: number;
+  formula_id: number;
+  formula_title: string;
+  event_type: FormulaEventType;
+  note: string;
+  created_at: string;
+}
+
+export interface RsipSummary {
+  total_formulas: number;
+  active_formulas: number;
+  inactive_formulas: number;
+  latest_event: FormulaEvent | null;
+}
+
+export interface ProtocolTimelineEvent {
+  event_type: 'focus' | 'reservation' | 'rsip';
+  id: number;
+  chain_id: number | null;
+  chain_name: string | null;
+  formula_id: number | null;
+  formula_title: string | null;
+  event_time: string;
+  ended_at: string | null;
+  result: string;
+  duration_minutes: number | null;
+  note: string | null;
+}
+
 export interface HistoryFilter {
-  type_filter?: 'focus' | 'reservation' | null;
+  type_filter?: 'focus' | 'reservation' | 'rsip' | null;
   result_filter?: 'success' | 'failed' | 'precedent' | null;
   chain_id?: number | null;
 }

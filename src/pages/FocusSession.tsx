@@ -196,7 +196,7 @@ export default function FocusSessionPage() {
         <div className="ruling-panel">
           <h3>判例化 — 写入规则</h3>
           <p className="ruling-desc">
-            该行为将被记录为本链今后永久允许的判例。当前链长度不会清零。
+            该行为将被正式写入本链判例库。写入后，未来同类情形在本链生命周期内视为永久允许，当前链长度不会清零。
           </p>
 
           <label className="form-field">
@@ -245,21 +245,21 @@ export default function FocusSessionPage() {
         <div className="ruling-panel">
           <h3>任务裁决</h3>
           <p className="ruling-desc">
-            你选择中途结束本次正式任务。请做出正式裁决——该决定不可撤销。
+            你选择中途结束本次正式任务。请做出正式裁决：要么承认本次违背主链协议并清零，要么把该行为永久写入判例。
           </p>
 
           <div className="ruling-options">
             <button className="ruling-option ruling-reset" onClick={handleRulingReset}>
               <span className="ruling-option-title">判定违规</span>
               <span className="ruling-option-consequence">
-                当前主链清零，历史最佳长度保留
+                裁定本次破坏主链协议，当前主链立即清零，历史最佳长度保留
               </span>
             </button>
 
             <button className="ruling-option ruling-precedent" onClick={() => setPhase('ruling_precedent')}>
               <span className="ruling-option-title">判例化</span>
               <span className="ruling-option-consequence">
-                保留链长度，该行为写入判例库，今后永久允许
+                保留链长度，该行为写入判例库，未来同类情形永久允许
               </span>
             </button>
           </div>
@@ -391,7 +391,7 @@ function DoneView({
           <div className="focus-complete-icon focus-fail-icon">&#10007;</div>
           <h2>判定违规</h2>
           <p className="ruling-result-desc">
-            本次任务被判定为违规，主链已清零。
+            本次行为已被裁定为破坏主链协议，当前主链已清零。
           </p>
 
           <div className="focus-chain-update">
@@ -422,7 +422,7 @@ function DoneView({
           <div className="focus-complete-icon focus-precedent-icon">&#9702;</div>
           <h2>已判例化</h2>
           <p className="ruling-result-desc">
-            该行为已写入本链判例库，当前主链未清零。
+            该行为已写入本链判例库，未来同类情形永久允许；当前主链未清零。
           </p>
 
           <div className="focus-chain-update">

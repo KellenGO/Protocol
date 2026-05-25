@@ -14,7 +14,11 @@ import type {
   FulfillReservationResult,
   GlobalActiveFocusSession,
   GlobalActiveReservationSession,
+  FormulaEvent,
   ProtocolEvent,
+  ProtocolTimelineEvent,
+  RsipFormula,
+  RsipSummary,
 } from '../../types';
 
 export async function getDbStatus(): Promise<string> {
@@ -54,6 +58,20 @@ export async function getProtocolHistory(filter: {
     typeFilter: filter.typeFilter ?? null,
     resultFilter: filter.resultFilter ?? null,
     chainId: filter.chainId ?? null,
+  });
+}
+
+export async function getProtocolTimeline(filter: {
+  typeFilter?: string | null;
+  resultFilter?: string | null;
+  chainId?: number | null;
+  limit?: number | null;
+}): Promise<ProtocolTimelineEvent[]> {
+  return invoke('get_protocol_timeline', {
+    typeFilter: filter.typeFilter ?? null,
+    resultFilter: filter.resultFilter ?? null,
+    chainId: filter.chainId ?? null,
+    limit: filter.limit ?? null,
   });
 }
 
@@ -167,4 +185,39 @@ export async function precedentReservationSessionFailure(
   description: string,
 ): Promise<FailReservationPrecedentResult> {
   return invoke('precedent_reservation_session_failure', { reservationId, title, description });
+}
+
+export async function createRsipFormula(params: {
+  title: string;
+  description: string;
+  parentId?: number | null;
+}): Promise<RsipFormula> {
+  return invoke('create_rsip_formula', {
+    title: params.title,
+    description: params.description,
+    parentId: params.parentId ?? null,
+  });
+}
+
+export async function getRsipFormulas(): Promise<RsipFormula[]> {
+  return invoke('get_rsip_formulas');
+}
+
+export async function activateRsipFormula(id: number): Promise<RsipFormula> {
+  return invoke('activate_rsip_formula', { id });
+}
+
+export async function deactivateRsipFormula(
+  id: number,
+  note?: string,
+): Promise<RsipFormula[]> {
+  return invoke('deactivate_rsip_formula', { id, note: note ?? null });
+}
+
+export async function getFormulaEvents(limit = 20): Promise<FormulaEvent[]> {
+  return invoke('get_formula_events', { limit });
+}
+
+export async function getRsipSummary(): Promise<RsipSummary> {
+  return invoke('get_rsip_summary');
 }

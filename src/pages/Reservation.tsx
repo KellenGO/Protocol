@@ -346,7 +346,7 @@ export default function Reservation() {
         <div className="ruling-panel" style={{ marginTop: 16 }}>
           <h3>判例化 — 写入规则</h3>
           <p className="ruling-desc">
-            该预约行为将被记录为本链今后永久允许的判例。主链长度不会清零。
+            该预约情形将被正式写入预约判例库。写入后，未来同类预约情形视为永久允许，主链长度不会受影响。
           </p>
 
           <label className="form-field">
@@ -390,19 +390,19 @@ export default function Reservation() {
         <div className="ruling-panel" style={{ marginTop: 16 }}>
           <h3>预约裁决</h3>
           <p className="ruling-desc">
-            预约已到期但你未履约。请做出正式裁决——该决定不可撤销。
+            预约已到期但你未履约。请做出正式裁决：要么承认预约失败记录成立，要么把该情形永久写入预约判例。
           </p>
           <div className="ruling-options">
             <button className="ruling-option ruling-reset" onClick={handleRulingReset}>
               <span className="ruling-option-title">判定预约失败</span>
               <span className="ruling-option-consequence">
-                本次预约记为未履约。主链长度不受影响。
+                本次预约记为未履约，预约失败记录成立。主链长度不受影响。
               </span>
             </button>
             <button className="ruling-option ruling-precedent" onClick={() => setPhase('ruling_precedent')}>
               <span className="ruling-option-title">判例化</span>
               <span className="ruling-option-consequence">
-                保留预约记录，该情形写入预约判例库，今后永久允许。
+                保留预约记录，该情形写入预约判例库，未来同类情形永久允许。
               </span>
             </button>
           </div>

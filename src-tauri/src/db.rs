@@ -82,6 +82,29 @@ impl Database {
                 value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS rsip_formulas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'inactive' CHECK(status IN ('inactive', 'active')),
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                activated_at TEXT,
+                deactivated_at TEXT,
+                FOREIGN KEY (parent_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS formula_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                formula_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL CHECK(event_type IN ('created', 'activated', 'deactivated', 'rollback_child_deactivated')),
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (formula_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
+            );
+
             INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_focus_duration', '25');
             INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_reservation_duration', '15');
             INSERT OR IGNORE INTO app_settings (key, value) VALUES ('enable_notifications', 'false');
