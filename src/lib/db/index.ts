@@ -21,6 +21,11 @@ import type {
   RsipSummary,
 } from '../../types';
 
+export interface PrecedentInput {
+  title: string;
+  description: string;
+}
+
 export async function getDbStatus(): Promise<string> {
   return invoke('get_db_status');
 }
@@ -106,6 +111,22 @@ export async function getGlobalActiveReservationSession(): Promise<GlobalActiveR
   return invoke('get_global_active_reservation_session');
 }
 
+export async function setFocusSessionPendingRuling(sessionId: number): Promise<void> {
+  return invoke('set_focus_session_pending_ruling', { sessionId });
+}
+
+export async function clearFocusSessionPendingRuling(sessionId: number): Promise<void> {
+  return invoke('clear_focus_session_pending_ruling', { sessionId });
+}
+
+export async function setReservationSessionPendingRuling(reservationId: number): Promise<void> {
+  return invoke('set_reservation_session_pending_ruling', { reservationId });
+}
+
+export async function clearReservationSessionPendingRuling(reservationId: number): Promise<void> {
+  return invoke('clear_reservation_session_pending_ruling', { reservationId });
+}
+
 export async function startFocusSession(
   chainId: number,
   durationMinutes: number,
@@ -130,16 +151,23 @@ export async function completeFocusSession(
 
 export async function failFocusSessionReset(
   sessionId: number,
+  behaviorType?: string,
 ): Promise<FailResetResult> {
-  return invoke('fail_focus_session_reset', { sessionId });
+  return invoke('fail_focus_session_reset', {
+    sessionId,
+    behaviorType: behaviorType ?? null,
+  });
 }
 
 export async function failFocusSessionPrecedent(
   sessionId: number,
-  title: string,
-  description: string,
+  input: PrecedentInput,
 ): Promise<FailPrecedentResult> {
-  return invoke('fail_focus_session_precedent', { sessionId, title, description });
+  return invoke('fail_focus_session_precedent', {
+    sessionId,
+    title: input.title,
+    description: input.description,
+  });
 }
 
 export async function getChainPrecedents(
@@ -175,16 +203,23 @@ export async function fulfillReservationAndStartFocus(
 
 export async function failReservationSessionReset(
   reservationId: number,
+  behaviorType?: string,
 ): Promise<FailReservationResetResult> {
-  return invoke('fail_reservation_session_reset', { reservationId });
+  return invoke('fail_reservation_session_reset', {
+    reservationId,
+    behaviorType: behaviorType ?? null,
+  });
 }
 
 export async function precedentReservationSessionFailure(
   reservationId: number,
-  title: string,
-  description: string,
+  input: PrecedentInput,
 ): Promise<FailReservationPrecedentResult> {
-  return invoke('precedent_reservation_session_failure', { reservationId, title, description });
+  return invoke('precedent_reservation_session_failure', {
+    reservationId,
+    title: input.title,
+    description: input.description,
+  });
 }
 
 export async function createRsipFormula(params: {

@@ -315,3 +315,13 @@ V1 中只保留：
 - **预约启动**：先承诺稍后启动，再在约定时限内进入正式任务
 - **国策 / 定式**：RSIP 中一个明确、低阻力、可执行的小规则
 - **国策树**：定式之间的依赖结构
+# Protocol Product Spec - Current Master Note
+
+Current status: Protocol has entered V2 Alpha and this worktree is implementing V2 Beta. CTDP V1 has passed as the usable minimum loop; V2 Alpha connected the RSIP formula tree to Dashboard and History; V2 Beta strengthens the "every dispute becomes a ruling" mechanism by making failure rulings, precedent creation, protocol boundaries, and History review more formal.
+
+Current priority:
+- Treat the precedent library as the protocol boundary.
+- Treat focus failure and reservation non-fulfillment as formal rulings, not ordinary cancellation.
+- Keep RSIP as the long-term stable-state module while CTDP Beta focuses on adjudication quality.
+
+Historical content below is preserved for continuity.

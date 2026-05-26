@@ -111,6 +111,71 @@ impl Database {
             ",
         )?;
 
+        migrate_precedents_to_core_schema(&conn)?;
+
         Ok(())
     }
+}
+
+fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(precedents)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<SqliteResult<Vec<String>>>()?;
+
+    let removed_columns = [
+        "category",
+        "failure_reason",
+        "ruling_note",
+        "severity",
+        "created_from_context",
+    ];
+
+    if !removed_columns.iter().any(|column| columns.iter().any(|existing| existing == column)) {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        ALTER TABLE precedents RENAME TO precedents_v2beta_legacy;
+        CREATE TABLE precedents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_id INTEGER NOT NULL,
+            scope TEXT NOT NULL CHECK(scope IN ('main_chain', 'reservation_chain')),
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            created_from_session_id INTEGER,
+            created_from_session_type TEXT CHECK(created_from_session_type IN ('focus', 'reservation')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
+        );
+        INSERT INTO precedents (
+            id,
+            chain_id,
+            scope,
+            title,
+            description,
+            created_from_session_id,
+            created_from_session_type,
+            created_at
+        )
+        SELECT
+            id,
+            chain_id,
+            scope,
+            title,
+            description,
+            created_from_session_id,
+            created_from_session_type,
+            created_at
+        FROM precedents_v2beta_legacy;
+        DROP TABLE precedents_v2beta_legacy;
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+        ",
+    )?;
+
+    Ok(())
 }

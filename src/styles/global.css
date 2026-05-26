@@ -570,6 +570,10 @@ body {
   transition: border-color 0.15s;
 }
 
+.form-field select {
+  width: 100%;
+}
+
 .form-field input:focus {
   border-color: var(--accent);
 }
@@ -678,6 +682,9 @@ body {
 
 .detail-actions {
   margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .action-hint {
@@ -928,6 +935,10 @@ body {
   max-width: 520px;
 }
 
+.ruling-panel-wide {
+  max-width: 760px;
+}
+
 .ruling-panel h3 {
   font-size: 16px;
   font-weight: 600;
@@ -984,6 +995,24 @@ body {
 
 .ruling-precedent:hover {
   border-color: var(--accent);
+}
+
+.ruling-form {
+  margin-bottom: 18px;
+}
+
+.ruling-boundary {
+  border-top: 1px solid var(--border-light);
+  padding-top: 16px;
+  margin-top: 18px;
+  margin-bottom: 18px;
+}
+
+.ruling-boundary h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
 }
 
 /* ===== Ruling Result ===== */
@@ -1317,6 +1346,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 18px;
   padding: 14px 18px;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
@@ -1356,6 +1386,9 @@ body {
 .history-result {
   font-size: 13px;
   flex-shrink: 0;
+  max-width: 360px;
+  line-height: 1.5;
+  text-align: right;
 }
 
 /* ===== RSIP ===== */
