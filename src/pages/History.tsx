@@ -1,30 +1,35 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getProtocolTimeline, getChains } from '../lib/db';
+import { getChains, getProtocolTimeline } from '../lib/db';
 import type { Chain, ProtocolTimelineEvent } from '../types';
 
 function eventLabel(event: ProtocolTimelineEvent): string {
+  const title = event.precedent_title ?? event.note ?? '该情形';
+
   if (event.event_type === 'focus') {
-    if (event.result === 'completed') return '协议节点完成，主链延续';
-    if (event.result === 'failed_reset') return '裁定违规，主链清零';
-    if (event.result === 'failed_precedent') return '裁定判例化，规则边界扩张';
+    if (event.result === 'completed') return '正式任务完成：协议节点完成，主链延续';
+    if (event.result === 'failed_reset') return `主链裁决：${event.note ? `争议行为为“${event.note}”，` : ''}链条已断裂并清零`;
+    if (event.result === 'failed_precedent') return `主链判例化：允许“${title}”，未来同类行为默认允许`;
   }
+
   if (event.event_type === 'reservation') {
-    if (event.result === 'fulfilled') return '预约履约，进入正式任务';
-    if (event.result === 'failed_reset') return '预约失败记录成立';
-    if (event.result === 'failed_precedent') return '预约情形判例化';
+    if (event.result === 'fulfilled') return '预约履约：已在约定时间进入正式任务';
+    if (event.result === 'failed_reset') return `预约违约裁决：${event.note ? `未履约类型为“${event.note}”，` : ''}预约失败记录成立`;
+    if (event.result === 'failed_precedent') return `预约判例化：允许“${title}”，未来同类情况默认允许`;
   }
+
   if (event.event_type === 'rsip') {
-    if (event.result === 'created') return '定式加入树';
-    if (event.result === 'activated') return '定式点亮';
-    if (event.result === 'deactivated') return '定式熄灭';
-    if (event.result === 'rollback_child_deactivated') return '递归回滚熄灭';
+    if (event.result === 'created') return 'RSIP 定式创建';
+    if (event.result === 'activated') return 'RSIP 定式点亮';
+    if (event.result === 'deactivated') return 'RSIP 定式熄灭';
+    if (event.result === 'rollback_child_deactivated') return 'RSIP 子定式回滚熄灭';
   }
+
   return event.result;
 }
 
 function eventTypeLabel(type: string): string {
-  if (type === 'focus') return '正式任务';
+  if (type === 'focus') return '主链';
   if (type === 'reservation') return '预约';
   return 'RSIP';
 }
@@ -61,37 +66,24 @@ export default function History() {
 
   return (
     <div className="page">
-      <h2>历史记录</h2>
+      <h2>协议时间线</h2>
 
-      {/* Filters */}
       <div className="filter-bar">
-        <select
-          className="form-select filter-select"
-          value={typeFilter ?? ''}
-          onChange={(e) => setTypeFilter(e.target.value || null)}
-        >
+        <select className="form-select filter-select" value={typeFilter ?? ''} onChange={(e) => setTypeFilter(e.target.value || null)}>
           <option value="">全部类型</option>
-          <option value="focus">正式任务</option>
+          <option value="focus">主链</option>
           <option value="reservation">预约</option>
           <option value="rsip">RSIP</option>
         </select>
 
-        <select
-          className="form-select filter-select"
-          value={resultFilter ?? ''}
-          onChange={(e) => setResultFilter(e.target.value || null)}
-        >
+        <select className="form-select filter-select" value={resultFilter ?? ''} onChange={(e) => setResultFilter(e.target.value || null)}>
           <option value="">全部结果</option>
           <option value="success">完成 / 履约 / 点亮</option>
-          <option value="failed">失败 / 熄灭 / 回滚</option>
+          <option value="failed">断链 / 违约 / 熄灭</option>
           <option value="precedent">判例化</option>
         </select>
 
-        <select
-          className="form-select filter-select"
-          value={chainFilter ?? ''}
-          onChange={(e) => setChainFilter(e.target.value ? Number(e.target.value) : null)}
-        >
+        <select className="form-select filter-select" value={chainFilter ?? ''} onChange={(e) => setChainFilter(e.target.value ? Number(e.target.value) : null)}>
           <option value="">全部主链</option>
           {chains.map((c) => (
             <option key={c.id} value={c.id}>{c.name}</option>
@@ -99,20 +91,13 @@ export default function History() {
         </select>
       </div>
 
-      {/* Events */}
       {loading ? (
-        <p className="placeholder-text">加载中…</p>
+        <p className="placeholder-text">加载中...</p>
       ) : events.length === 0 ? (
         <div className="empty-state" style={{ marginTop: 40 }}>
-          <p className="empty-title">
-            {typeFilter || resultFilter || chainFilter
-              ? '没有匹配的记录'
-              : '暂无历史记录'}
-          </p>
+          <p className="empty-title">{typeFilter || resultFilter || chainFilter ? '没有匹配的协议事件' : '暂无协议事件'}</p>
           <p className="empty-desc">
-            {typeFilter || resultFilter || chainFilter
-              ? '尝试调整筛选条件。'
-              : '完成正式任务或预约后，记录会出现在这里。'}
+            {typeFilter || resultFilter || chainFilter ? '尝试调整筛选条件。' : '完成任务、预约履约或做出裁决后，事件会出现在这里。'}
           </p>
         </div>
       ) : (
@@ -120,35 +105,25 @@ export default function History() {
           {events.map((e) => (
             <div key={`${e.event_type}-${e.id}`} className="history-item">
               <div className="history-item-left">
-                <span className={`event-type-badge event-${e.event_type}`}>
-                  {eventTypeLabel(e.event_type)}
-                </span>
+                <span className={`event-type-badge event-${e.event_type}`}>{eventTypeLabel(e.event_type)}</span>
                 <div className="history-item-info">
                   {e.event_type === 'rsip' ? (
-                    <button
-                      className="history-chain-link"
-                      onClick={() => navigate('/rsip')}
-                    >
+                    <button className="history-chain-link" onClick={() => navigate('/rsip')}>
                       {e.formula_title ?? 'RSIP 定式'}
                     </button>
                   ) : (
-                    <button
-                      className="history-chain-link"
-                      onClick={() => e.chain_id && navigate(`/chains/${e.chain_id}`)}
-                    >
+                    <button className="history-chain-link" onClick={() => e.chain_id && navigate(`/chains/${e.chain_id}`)}>
                       {e.chain_name}
                     </button>
                   )}
                   <span className="history-event-time">
                     {formatDateTime(e.event_time)}
-                    {e.ended_at && ` → ${formatDateTime(e.ended_at!)}`}
+                    {e.ended_at && ` -> ${formatDateTime(e.ended_at)}`}
                   </span>
-                  {e.note && <span className="history-event-note">{e.note}</span>}
+                  {e.note && <span className="history-event-note">争议行为类型：{e.note}</span>}
                 </div>
               </div>
-              <span className={`history-result result-${e.result}`}>
-                {eventLabel(e)}
-              </span>
+              <span className={`history-result result-${e.result}`}>{eventLabel(e)}</span>
             </div>
           ))}
         </div>

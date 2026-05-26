@@ -69,7 +69,12 @@ export interface FailPrecedentResult {
 
 export type ChainPrecedent = Pick<
   Precedent,
-  'id' | 'chain_id' | 'scope' | 'title' | 'description' | 'created_at'
+  | 'id'
+  | 'chain_id'
+  | 'scope'
+  | 'title'
+  | 'description'
+  | 'created_at'
 >;
 
 export interface ActiveReservationSession {
@@ -81,10 +86,12 @@ export interface ActiveReservationSession {
 
 export interface GlobalActiveFocusSession extends ActiveFocusSession {
   chain_name: string;
+  pending_ruling: boolean;
 }
 
 export interface GlobalActiveReservationSession extends ActiveReservationSession {
   chain_name: string;
+  pending_ruling: boolean;
 }
 
 export interface FulfillReservationResult {
@@ -108,7 +115,13 @@ export interface DashboardSummary {
   max_current_chain_length: number;
   today_completed_focus_count: number;
   total_completed_focus_count: number;
-  active_protocol_state: 'focus' | 'reservation_countdown' | 'reservation_due' | 'none';
+  active_protocol_state:
+    | 'focus'
+    | 'focus_pending_ruling'
+    | 'reservation_countdown'
+    | 'reservation_due'
+    | 'reservation_pending_ruling'
+    | 'none';
   active_chain_id: number | null;
   active_chain_name: string | null;
 }
@@ -173,6 +186,8 @@ export interface ProtocolTimelineEvent {
   result: string;
   duration_minutes: number | null;
   note: string | null;
+  precedent_id: number | null;
+  precedent_title: string | null;
 }
 
 export interface HistoryFilter {
