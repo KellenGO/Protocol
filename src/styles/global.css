@@ -720,6 +720,71 @@ body {
   margin-bottom: 12px;
 }
 
+/* ===== Sacred Seat ===== */
+
+.sacred-seat-panel {
+  max-width: 760px;
+  margin-top: 8px;
+  padding: 18px 20px 18px 22px;
+  background: var(--accent-subtle);
+  border: 1px solid var(--border-medium);
+  border-left: 5px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.sacred-seat-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.sacred-seat-kicker {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.sacred-seat-main h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sacred-seat-main p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.sacred-seat-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.sacred-seat-metrics span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sacred-seat-metrics strong {
+  font-size: 18px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.sacred-seat-actions {
+  margin-top: 0;
+}
+
 /* ===== Global Focus Button ===== */
 
 .global-focus-btn {

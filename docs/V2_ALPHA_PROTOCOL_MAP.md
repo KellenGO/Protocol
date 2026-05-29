@@ -8,6 +8,10 @@
 
 对应 CTDP 的 Main Chain。用户创建一条主链后，每次启动正式任务都意味着进入该链的协议状态。
 
+### 神圣座位
+
+对应 CTDP 的“神圣座位原理”。在 V2 Beta 中，神圣座位只是主链详情里的醒目标识，用来标明这条链的标志性触发动作是“开始正式任务”。它不作为独立数据表、独立页面状态或新的会话类型存在；实际执行仍由现有 `focus_sessions` 记录。
+
 - 正式任务完成：写入 `focus_sessions.completed`，主链当前长度加一。
 - 正式任务失败并裁定违规：写入 `focus_sessions.failed_reset`，主链当前长度清零。
 - 正式任务失败并判例化：写入 `focus_sessions.failed_precedent`，新增一条主链判例，主链当前长度不清零。

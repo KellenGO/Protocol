@@ -15,6 +15,7 @@ V2 Alpha has been accepted as the current baseline:
 V2 Beta strengthens the precedent and ruling system.
 
 Current development priority:
+- Make the sacred-seat marker obvious on Chain Detail as the visible CTDP trigger label.
 - Make protocol boundaries visible through the precedent library.
 - Turn focus failure into a formal main-chain ruling.
 - Turn reservation non-fulfillment into a formal reservation breach ruling.

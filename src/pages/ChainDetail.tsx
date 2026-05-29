@@ -120,64 +120,86 @@ export default function ChainDetail() {
         </div>
       </div>
 
-      <div className="detail-actions">
-        {warnMsg && <p className="action-warn">{warnMsg}</p>}
-        {error && <p className="action-error">{error}</p>}
+      <div className="sacred-seat-panel">
+        <div className="sacred-seat-main">
+          <span className="sacred-seat-kicker">神圣座位标识</span>
+          <h3>标志性触发动作：开始正式任务</h3>
+          <p>
+            这是本主链的醒目标识：当你按下“开始正式任务”，就视为进入这条链的正式协议状态。
+          </p>
+        </div>
+        <div className="sacred-seat-metrics">
+          <span>
+            <strong>{chain.current_length}</strong>
+            当前链长
+          </span>
+          <span>
+            <strong>{chain.focus_duration_minutes}</strong>
+            分钟任务
+          </span>
+          <span>
+            <strong>正式</strong>
+            触发等级
+          </span>
+        </div>
+        <div className="detail-actions sacred-seat-actions">
+          {warnMsg && <p className="action-warn">{warnMsg}</p>}
+          {error && <p className="action-error">{error}</p>}
 
-        {hasActiveFocusOnThisChain ? (
-          <button
-            className="btn btn-primary"
-            onClick={() => navigate(`/chains/${chain.id}/focus`)}
-          >
-            回到专注
-          </button>
-        ) : (
-          <button
-            className="btn btn-primary"
-            disabled={starting}
-            onClick={async () => {
-              if (!chain) return;
-              setStarting(true);
-              setWarnMsg('');
-              setError('');
-              try {
-                const globalFocus = await getGlobalActiveFocusSession();
-                if (globalFocus) {
-                  setWarnMsg(
-                    `⚠️ 已有任务在进行：${globalFocus.chain_name}`,
-                  );
-                  return;
+          {hasActiveFocusOnThisChain ? (
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate(`/chains/${chain.id}/focus`)}
+            >
+              回到正式任务
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              disabled={starting}
+              onClick={async () => {
+                if (!chain) return;
+                setStarting(true);
+                setWarnMsg('');
+                setError('');
+                try {
+                  const globalFocus = await getGlobalActiveFocusSession();
+                  if (globalFocus) {
+                    setWarnMsg(
+                      `已有任务在进行：${globalFocus.chain_name}`,
+                    );
+                    return;
+                  }
+
+                  const globalReservation = await getGlobalActiveReservationSession();
+                  if (globalReservation) {
+                    setError(
+                      `当前已有进行中的预约（链「${globalReservation.chain_name}」），请先处理该预约。`,
+                    );
+                    return;
+                  }
+
+                  await startFocusSession(chain.id, chain.focus_duration_minutes);
+                  setHasActiveFocusOnThisChain(true);
+                  navigate(`/chains/${chain.id}/focus`);
+                } catch (err) {
+                  setError(String(err));
+                } finally {
+                  setStarting(false);
                 }
+              }}
+            >
+              {starting ? '正在启动…' : '开始正式任务'}
+            </button>
+          )}
 
-                const globalReservation = await getGlobalActiveReservationSession();
-                if (globalReservation) {
-                  setError(
-                    `当前已有进行中的预约（链「${globalReservation.chain_name}」），请先处理该预约。`,
-                  );
-                  return;
-                }
-
-                await startFocusSession(chain.id, chain.focus_duration_minutes);
-                setHasActiveFocusOnThisChain(true);
-                navigate(`/chains/${chain.id}/focus`);
-              } catch (err) {
-                setError(String(err));
-              } finally {
-                setStarting(false);
-              }
-            }}
+          <button
+            className="btn btn-secondary"
+            onClick={() => setEditing(true)}
           >
-            {starting ? '正在启动…' : '开始正式任务'}
+            编辑主链
           </button>
-        )}
-
-        <button
-          className="btn btn-secondary"
-          style={{ marginLeft: 8 }}
-          onClick={() => setEditing(true)}
-        >
-          编辑主链
-        </button>
+        </div>
       </div>
 
       <div className="precedents-section">
