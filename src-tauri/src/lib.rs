@@ -6,6 +6,7 @@ use tauri::Manager;
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const AUXILIARY_EXPIRED_NOTE: &str = "未在预约时间内进入主链";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, current_length, best_length, status, created_at, updated_at";
+const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at";
 
 fn clean_option(value: Option<String>) -> String {
     value.unwrap_or_default().trim().to_string()
@@ -54,6 +55,32 @@ fn chain_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
         "status": row.get::<_, String>(11)?,
         "created_at": row.get::<_, String>(12)?,
         "updated_at": row.get::<_, String>(13)?,
+    }))
+}
+
+fn rsip_formula_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "parent_id": row.get::<_, Option<i64>>(1)?,
+        "title": row.get::<_, String>(2)?,
+        "description": row.get::<_, String>(3)?,
+        "status": row.get::<_, String>(4)?,
+        "position": row.get::<_, i64>(5)?,
+        "created_at": row.get::<_, String>(6)?,
+        "updated_at": row.get::<_, String>(7)?,
+        "activated_at": row.get::<_, Option<String>>(8)?,
+        "deactivated_at": row.get::<_, Option<String>>(9)?,
+    }))
+}
+
+fn formula_event_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "formula_id": row.get::<_, i64>(1)?,
+        "formula_title": row.get::<_, String>(2)?,
+        "event_type": row.get::<_, String>(3)?,
+        "note": row.get::<_, String>(4)?,
+        "created_at": row.get::<_, String>(5)?,
     }))
 }
 
@@ -145,14 +172,6 @@ fn expire_reservation_session_by_id(
 }
 
 #[tauri::command]
-fn get_db_status(state: tauri::State<'_, Database>) -> Result<String, String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute_batch("SELECT 1")
-        .map(|_| "connected".to_string())
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn create_chain(
     state: tauri::State<'_, Database>,
     name: String,
@@ -167,7 +186,8 @@ fn create_chain(
     let name = clean_required(name, "链名称不能为空")?;
     let trigger_action = clean_required(trigger_action, "触发动作不能为空")?;
     let completion_condition = clean_required(completion_condition, "完成条件不能为空")?;
-    let auxiliary_trigger_action = clean_required(auxiliary_trigger_action, "辅助链触发动作不能为空")?;
+    let auxiliary_trigger_action =
+        clean_required(auxiliary_trigger_action, "辅助链触发动作不能为空")?;
     let auxiliary_completion_condition =
         clean_required(auxiliary_completion_condition, "辅助链完成条件不能为空")?;
     if focus_duration_minutes < 1 {
@@ -216,7 +236,8 @@ fn update_chain(
     let name = clean_required(name, "主链名称不能为空")?;
     let trigger_action = clean_required(trigger_action, "触发动作不能为空")?;
     let completion_condition = clean_required(completion_condition, "完成条件不能为空")?;
-    let auxiliary_trigger_action = clean_required(auxiliary_trigger_action, "辅助链触发动作不能为空")?;
+    let auxiliary_trigger_action =
+        clean_required(auxiliary_trigger_action, "辅助链触发动作不能为空")?;
     let auxiliary_completion_condition =
         clean_required(auxiliary_completion_condition, "辅助链完成条件不能为空")?;
     if focus_duration_minutes < 1 {
@@ -271,12 +292,13 @@ fn get_chain(state: tauri::State<'_, Database>, id: i64) -> Result<serde_json::V
 fn get_chains(state: tauri::State<'_, Database>) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(&format!("SELECT {} FROM chains ORDER BY created_at DESC", CHAIN_FIELDS))
+        .prepare(&format!(
+            "SELECT {} FROM chains ORDER BY created_at DESC",
+            CHAIN_FIELDS
+        ))
         .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map([], chain_json)
-        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], chain_json).map_err(|e| e.to_string())?;
 
     let mut chains = Vec::new();
     for row in rows {
@@ -788,39 +810,6 @@ fn get_global_active_reservation_session(
 }
 
 #[tauri::command]
-fn set_reservation_session_pending_ruling(
-    state: tauri::State<'_, Database>,
-    reservation_id: i64,
-) -> Result<(), String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let rows = conn
-        .execute(
-            "UPDATE reservation_sessions SET failure_note = ?2 WHERE id = ?1 AND result IS NULL",
-            rusqlite::params![reservation_id, PENDING_RULING_NOTE],
-        )
-        .map_err(|e| e.to_string())?;
-
-    if rows == 0 {
-        return Err("reservation session is not active".into());
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn clear_reservation_session_pending_ruling(
-    state: tauri::State<'_, Database>,
-    reservation_id: i64,
-) -> Result<(), String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE reservation_sessions SET failure_note = NULL WHERE id = ?1 AND result IS NULL AND failure_note = ?2",
-        rusqlite::params![reservation_id, PENDING_RULING_NOTE],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
 fn start_reservation_session(
     state: tauri::State<'_, Database>,
     chain_id: i64,
@@ -896,34 +885,6 @@ fn start_reservation_session(
 }
 
 #[tauri::command]
-fn get_active_reservation_session(
-    state: tauri::State<'_, Database>,
-    chain_id: i64,
-) -> Result<Option<serde_json::Value>, String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    expire_overdue_reservation_sessions(&conn)?;
-    let result = conn
-        .query_row(
-            "SELECT id, chain_id, created_at, due_at, trigger_action, completion_condition FROM reservation_sessions
-             WHERE chain_id = ?1 AND result IS NULL
-             ORDER BY created_at DESC LIMIT 1",
-            [chain_id],
-            |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, i64>(0)?,
-                    "chain_id": row.get::<_, i64>(1)?,
-                    "created_at": row.get::<_, String>(2)?,
-                    "due_at": row.get::<_, String>(3)?,
-                    "trigger_action": row.get::<_, String>(4)?,
-                    "completion_condition": row.get::<_, String>(5)?,
-                }))
-            },
-        )
-        .ok();
-    Ok(result)
-}
-
-#[tauri::command]
 fn fulfill_reservation_and_start_focus(
     state: tauri::State<'_, Database>,
     reservation_id: i64,
@@ -942,11 +903,9 @@ fn fulfill_reservation_and_start_focus(
         .map_err(|_| "辅助链不存在或已结束".to_string())?;
 
     let due_past: bool = conn
-        .query_row(
-            "SELECT datetime(?) <= datetime('now')",
-            [&due_at],
-            |row| row.get(0),
-        )
+        .query_row("SELECT datetime(?) <= datetime('now')", [&due_at], |row| {
+            row.get(0)
+        })
         .map_err(|e| e.to_string())?;
     if due_past {
         let _ = expire_reservation_session_by_id(&conn, reservation_id)?;
@@ -1042,177 +1001,6 @@ fn expire_reservation_session(
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     expire_reservation_session_by_id(&conn, reservation_id)
 }
-
-#[tauri::command]
-fn fail_reservation_session_reset(
-    state: tauri::State<'_, Database>,
-    reservation_id: i64,
-    behavior_type: Option<String>,
-    debug_category: Option<String>,
-    debug_note: Option<String>,
-) -> Result<serde_json::Value, String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let failure_note = behavior_note(behavior_type);
-    let debug_category = optional_note(debug_category);
-    let debug_note = optional_note(debug_note);
-
-    let chain_id: i64 = conn
-        .query_row(
-            "SELECT chain_id FROM reservation_sessions WHERE id = ?1 AND result IS NULL",
-            [reservation_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "预约不存在或已结束".to_string())?;
-
-    conn.execute(
-        "UPDATE reservation_sessions
-         SET result = 'failed_reset',
-             failure_note = ?2,
-             debug_category = ?3,
-             debug_note = ?4
-         WHERE id = ?1",
-        rusqlite::params![reservation_id, failure_note, debug_category, debug_note],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let session = conn.query_row(
-        "SELECT id, chain_id, created_at, due_at, fulfilled_at, result, failure_note, trigger_action, completion_condition, debug_category, debug_note FROM reservation_sessions WHERE id = ?1",
-        [reservation_id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "chain_id": row.get::<_, i64>(1)?,
-                "created_at": row.get::<_, String>(2)?,
-                "due_at": row.get::<_, String>(3)?,
-                "fulfilled_at": row.get::<_, Option<String>>(4)?,
-                "result": row.get::<_, Option<String>>(5)?,
-                "failure_note": row.get::<_, Option<String>>(6)?,
-                "trigger_action": row.get::<_, String>(7)?,
-                "completion_condition": row.get::<_, String>(8)?,
-                "debug_category": row.get::<_, Option<String>>(9)?,
-                "debug_note": row.get::<_, Option<String>>(10)?,
-            }))
-        },
-    )
-    .map_err(|e| e.to_string())?;
-
-    let chain = get_chain_json(&conn, chain_id)?;
-
-    Ok(serde_json::json!({
-        "session": session,
-        "chain": chain,
-    }))
-}
-
-#[tauri::command]
-fn precedent_reservation_session_failure(
-    state: tauri::State<'_, Database>,
-    reservation_id: i64,
-    title: String,
-    description: String,
-    debug_category: Option<String>,
-    debug_note: Option<String>,
-) -> Result<serde_json::Value, String> {
-    if title.trim().is_empty() {
-        return Err("判例标题不能为空".into());
-    }
-
-    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let failure_note = Some(title.trim().to_string());
-    let debug_category = optional_note(debug_category);
-    let debug_note = optional_note(debug_note);
-
-    let chain_id: i64 = conn
-        .query_row(
-            "SELECT chain_id FROM reservation_sessions WHERE id = ?1 AND result IS NULL",
-            [reservation_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| "预约不存在或已结束".to_string())?;
-
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "UPDATE reservation_sessions
-         SET result = 'failed_precedent',
-             failure_note = ?2,
-             debug_category = ?3,
-             debug_note = ?4
-         WHERE id = ?1",
-        rusqlite::params![reservation_id, failure_note, debug_category, debug_note],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO precedents (chain_id, scope, title, description, created_from_session_id, created_from_session_type) VALUES (?1, 'reservation_chain', ?2, ?3, ?4, 'reservation')",
-        rusqlite::params![chain_id, title.trim(), description.trim(), reservation_id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let precedent_id = tx.last_insert_rowid();
-    tx.commit().map_err(|e| e.to_string())?;
-
-    let session = conn.query_row(
-        "SELECT id, chain_id, created_at, due_at, fulfilled_at, result, failure_note, trigger_action, completion_condition, debug_category, debug_note FROM reservation_sessions WHERE id = ?1",
-        [reservation_id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "chain_id": row.get::<_, i64>(1)?,
-                "created_at": row.get::<_, String>(2)?,
-                "due_at": row.get::<_, String>(3)?,
-                "fulfilled_at": row.get::<_, Option<String>>(4)?,
-                "result": row.get::<_, Option<String>>(5)?,
-                "failure_note": row.get::<_, Option<String>>(6)?,
-                "trigger_action": row.get::<_, String>(7)?,
-                "completion_condition": row.get::<_, String>(8)?,
-                "debug_category": row.get::<_, Option<String>>(9)?,
-                "debug_note": row.get::<_, Option<String>>(10)?,
-            }))
-        },
-    )
-    .map_err(|e| e.to_string())?;
-
-    let chain = get_chain_json(&conn, chain_id)?;
-
-    let precedent = conn.query_row(
-        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, created_at FROM precedents WHERE id = ?1",
-        [precedent_id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "chain_id": row.get::<_, i64>(1)?,
-                "scope": row.get::<_, String>(2)?,
-                "title": row.get::<_, String>(3)?,
-                "description": row.get::<_, String>(4)?,
-                "created_from_session_id": row.get::<_, Option<i64>>(5)?,
-                "created_from_session_type": row.get::<_, Option<String>>(6)?,
-                "created_at": row.get::<_, String>(7)?,
-            }))
-        },
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(serde_json::json!({
-        "session": session,
-        "chain": chain,
-        "precedent": precedent,
-    }))
-}
-
-#[tauri::command]
-fn get_setting(state: tauri::State<'_, Database>, key: String) -> Result<Option<String>, String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT value FROM app_settings WHERE key = ?1")
-        .map_err(|e| e.to_string())?;
-
-    let result = stmt
-        .query_row([&key], |row| row.get::<_, String>(0))
-        .ok();
-    Ok(result)
-}
-
 #[tauri::command]
 fn get_app_settings(state: tauri::State<'_, Database>) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1265,11 +1053,19 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
     expire_overdue_reservation_sessions(&conn)?;
 
     let chain_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM chains WHERE status = 'active'", [], |row| row.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM chains WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|e| e.to_string())?;
 
     let max_length: i64 = conn
-        .query_row("SELECT COALESCE(MAX(current_length), 0) FROM chains WHERE status = 'active'", [], |row| row.get(0))
+        .query_row(
+            "SELECT COALESCE(MAX(current_length), 0) FROM chains WHERE status = 'active'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|e| e.to_string())?;
 
     let today_completed: i64 = conn
@@ -1277,7 +1073,11 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
         .map_err(|e| e.to_string())?;
 
     let total_completed: i64 = conn
-        .query_row("SELECT COUNT(*) FROM focus_sessions WHERE result = 'completed'", [], |row| row.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM focus_sessions WHERE result = 'completed'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(|e| e.to_string())?;
 
     let active_focus: Option<(i64, String, Option<String>)> = conn.query_row(
@@ -1290,7 +1090,8 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
         [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?)),
     ).ok();
 
-    let (state, active_chain_id, active_chain_name) = if let Some((fid, fname, note)) = active_focus {
+    let (state, active_chain_id, active_chain_name) = if let Some((fid, fname, note)) = active_focus
+    {
         let state_str = if note.as_deref() == Some(PENDING_RULING_NOTE) {
             "focus_pending_ruling"
         } else {
@@ -1320,8 +1121,9 @@ fn get_recent_protocol_events(
     state: tauri::State<'_, Database>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT 'focus' AS event_type, f.id, f.chain_id, c.name AS chain_name,
+    let mut stmt = conn
+        .prepare(
+            "SELECT 'focus' AS event_type, f.id, f.chain_id, c.name AS chain_name,
                 f.started_at AS event_time,
                 f.ended_at,
                 f.result,
@@ -1336,99 +1138,24 @@ fn get_recent_protocol_events(
                 NULL AS duration_minutes
          FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id
          WHERE r.result IS NOT NULL
-         ORDER BY event_time DESC LIMIT 8"
-    ).map_err(|e| e.to_string())?;
+         ORDER BY event_time DESC LIMIT 8",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "event_type": row.get::<_, String>(0)?,
-            "id": row.get::<_, i64>(1)?,
-            "chain_id": row.get::<_, i64>(2)?,
-            "chain_name": row.get::<_, String>(3)?,
-            "event_time": row.get::<_, String>(4)?,
-            "ended_at": row.get::<_, Option<String>>(5)?,
-            "result": row.get::<_, String>(6)?,
-            "duration_minutes": row.get::<_, Option<i64>>(7)?,
-        }))
-    }).map_err(|e| e.to_string())?;
-
-    let mut events = Vec::new();
-    for row in rows {
-        events.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(events)
-}
-
-#[tauri::command]
-fn get_protocol_history(
-    state: tauri::State<'_, Database>,
-    type_filter: Option<String>,
-    result_filter: Option<String>,
-    chain_id: Option<i64>,
-) -> Result<Vec<serde_json::Value>, String> {
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-
-    let mut sql = String::from(
-        "SELECT 'focus' AS event_type, f.id, f.chain_id, c.name AS chain_name,
-                f.started_at AS event_time, f.ended_at, f.result, f.duration_minutes
-         FROM focus_sessions f JOIN chains c ON c.id = f.chain_id
-         WHERE f.result IS NOT NULL
-         UNION ALL
-         SELECT 'reservation' AS event_type, r.id, r.chain_id, c.name AS chain_name,
-                r.created_at AS event_time, r.fulfilled_at AS ended_at, r.result, NULL
-         FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id
-         WHERE r.result IS NOT NULL"
-    );
-
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut outer_where = Vec::new();
-
-    if let Some(ref tf) = type_filter {
-        if tf == "focus" {
-            outer_where.push(format!("event_type = 'focus'"));
-        } else if tf == "reservation" {
-            outer_where.push(format!("event_type = 'reservation'"));
-        }
-    }
-    if let Some(ref rf) = result_filter {
-        if rf == "success" {
-            outer_where.push(format!("result IN ('completed', 'fulfilled')"));
-        } else if rf == "failed" {
-            outer_where.push(format!("result IN ('failed_reset')"));
-        } else if rf == "precedent" {
-            outer_where.push(format!("result IN ('failed_precedent')"));
-        }
-    }
-    if let Some(cid) = chain_id {
-        params.push(Box::new(cid));
-        outer_where.push(format!("chain_id = ?{}", params.len()));
-    }
-
-    if !outer_where.is_empty() {
-        sql = format!(
-            "SELECT * FROM ({}) WHERE {} ORDER BY event_time DESC",
-            sql,
-            outer_where.join(" AND ")
-        );
-    } else {
-        sql = format!("SELECT * FROM ({}) ORDER BY event_time DESC", sql);
-    }
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-
-    let rows = stmt.query_map(param_refs.as_slice(), |row| {
-        Ok(serde_json::json!({
-            "event_type": row.get::<_, String>(0)?,
-            "id": row.get::<_, i64>(1)?,
-            "chain_id": row.get::<_, i64>(2)?,
-            "chain_name": row.get::<_, String>(3)?,
-            "event_time": row.get::<_, String>(4)?,
-            "ended_at": row.get::<_, Option<String>>(5)?,
-            "result": row.get::<_, String>(6)?,
-            "duration_minutes": row.get::<_, Option<i64>>(7)?,
-        }))
-    }).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "event_type": row.get::<_, String>(0)?,
+                "id": row.get::<_, i64>(1)?,
+                "chain_id": row.get::<_, i64>(2)?,
+                "chain_name": row.get::<_, String>(3)?,
+                "event_time": row.get::<_, String>(4)?,
+                "ended_at": row.get::<_, Option<String>>(5)?,
+                "result": row.get::<_, String>(6)?,
+                "duration_minutes": row.get::<_, Option<i64>>(7)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
 
     let mut events = Vec::new();
     for row in rows {
@@ -1436,7 +1163,6 @@ fn get_protocol_history(
     }
     Ok(events)
 }
-
 #[tauri::command]
 fn create_rsip_formula(
     state: tauri::State<'_, Database>,
@@ -1493,22 +1219,12 @@ fn create_rsip_formula(
     .map_err(|e| e.to_string())?;
 
     conn.query_row(
-        "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at FROM rsip_formulas WHERE id = ?1",
+        &format!(
+            "SELECT {} FROM rsip_formulas WHERE id = ?1",
+            RSIP_FORMULA_FIELDS
+        ),
         [id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "parent_id": row.get::<_, Option<i64>>(1)?,
-                "title": row.get::<_, String>(2)?,
-                "description": row.get::<_, String>(3)?,
-                "status": row.get::<_, String>(4)?,
-                "position": row.get::<_, i64>(5)?,
-                "created_at": row.get::<_, String>(6)?,
-                "updated_at": row.get::<_, String>(7)?,
-                "activated_at": row.get::<_, Option<String>>(8)?,
-                "deactivated_at": row.get::<_, Option<String>>(9)?,
-            }))
-        },
+        rsip_formula_json,
     )
     .map_err(|e| e.to_string())
 }
@@ -1517,28 +1233,16 @@ fn create_rsip_formula(
 fn get_rsip_formulas(state: tauri::State<'_, Database>) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(
-            "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at
+        .prepare(&format!(
+            "SELECT {}
              FROM rsip_formulas
              ORDER BY COALESCE(parent_id, 0), position, created_at",
-        )
+            RSIP_FORMULA_FIELDS
+        ))
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "parent_id": row.get::<_, Option<i64>>(1)?,
-                "title": row.get::<_, String>(2)?,
-                "description": row.get::<_, String>(3)?,
-                "status": row.get::<_, String>(4)?,
-                "position": row.get::<_, i64>(5)?,
-                "created_at": row.get::<_, String>(6)?,
-                "updated_at": row.get::<_, String>(7)?,
-                "activated_at": row.get::<_, Option<String>>(8)?,
-                "deactivated_at": row.get::<_, Option<String>>(9)?,
-            }))
-        })
+        .query_map([], rsip_formula_json)
         .map_err(|e| e.to_string())?;
 
     let mut formulas = Vec::new();
@@ -1582,22 +1286,12 @@ fn activate_rsip_formula(
     tx.commit().map_err(|e| e.to_string())?;
 
     conn.query_row(
-        "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at FROM rsip_formulas WHERE id = ?1",
+        &format!(
+            "SELECT {} FROM rsip_formulas WHERE id = ?1",
+            RSIP_FORMULA_FIELDS
+        ),
         [id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "parent_id": row.get::<_, Option<i64>>(1)?,
-                "title": row.get::<_, String>(2)?,
-                "description": row.get::<_, String>(3)?,
-                "status": row.get::<_, String>(4)?,
-                "position": row.get::<_, i64>(5)?,
-                "created_at": row.get::<_, String>(6)?,
-                "updated_at": row.get::<_, String>(7)?,
-                "activated_at": row.get::<_, Option<String>>(8)?,
-                "deactivated_at": row.get::<_, Option<String>>(9)?,
-            }))
-        },
+        rsip_formula_json,
     )
     .map_err(|e| e.to_string())
 }
@@ -1678,27 +1372,15 @@ fn deactivate_rsip_formula(
     tx.commit().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare(
-            "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at
+        .prepare(&format!(
+            "SELECT {}
              FROM rsip_formulas
              ORDER BY COALESCE(parent_id, 0), position, created_at",
-        )
+            RSIP_FORMULA_FIELDS
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "parent_id": row.get::<_, Option<i64>>(1)?,
-                "title": row.get::<_, String>(2)?,
-                "description": row.get::<_, String>(3)?,
-                "status": row.get::<_, String>(4)?,
-                "position": row.get::<_, i64>(5)?,
-                "created_at": row.get::<_, String>(6)?,
-                "updated_at": row.get::<_, String>(7)?,
-                "activated_at": row.get::<_, Option<String>>(8)?,
-                "deactivated_at": row.get::<_, Option<String>>(9)?,
-            }))
-        })
+        .query_map([], rsip_formula_json)
         .map_err(|e| e.to_string())?;
 
     let mut formulas = Vec::new();
@@ -1726,16 +1408,7 @@ fn get_formula_events(
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([safe_limit], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "formula_id": row.get::<_, i64>(1)?,
-                "formula_title": row.get::<_, String>(2)?,
-                "event_type": row.get::<_, String>(3)?,
-                "note": row.get::<_, String>(4)?,
-                "created_at": row.get::<_, String>(5)?,
-            }))
-        })
+        .query_map([safe_limit], formula_event_json)
         .map_err(|e| e.to_string())?;
 
     let mut events = Vec::new();
@@ -1767,16 +1440,7 @@ fn get_rsip_summary(state: tauri::State<'_, Database>) -> Result<serde_json::Val
              ORDER BY e.created_at DESC, e.id DESC
              LIMIT 1",
             [],
-            |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, i64>(0)?,
-                    "formula_id": row.get::<_, i64>(1)?,
-                    "formula_title": row.get::<_, String>(2)?,
-                    "event_type": row.get::<_, String>(3)?,
-                    "note": row.get::<_, String>(4)?,
-                    "created_at": row.get::<_, String>(5)?,
-                }))
-            },
+            formula_event_json,
         )
         .ok();
 
@@ -1838,9 +1502,13 @@ fn get_protocol_timeline(
     }
     if let Some(ref rf) = result_filter {
         if rf == "success" {
-            filters.push("result IN ('completed', 'fulfilled', 'activated', 'created')".to_string());
+            filters
+                .push("result IN ('completed', 'fulfilled', 'activated', 'created')".to_string());
         } else if rf == "failed" {
-            filters.push("result IN ('failed_reset', 'deactivated', 'rollback_child_deactivated')".to_string());
+            filters.push(
+                "result IN ('failed_reset', 'deactivated', 'rollback_child_deactivated')"
+                    .to_string(),
+            );
         } else if rf == "precedent" {
             filters.push("result IN ('failed_precedent')".to_string());
         }
@@ -1854,7 +1522,11 @@ fn get_protocol_timeline(
         sql = format!("{} WHERE {}", sql, filters.join(" AND "));
     }
     params.push(Box::new(safe_limit));
-    sql = format!("{} ORDER BY event_time DESC, id DESC LIMIT ?{}", sql, params.len());
+    sql = format!(
+        "{} ORDER BY event_time DESC, id DESC LIMIT ?{}",
+        sql,
+        params.len()
+    );
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
@@ -1900,7 +1572,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_db_status,
             create_chain,
             update_chain,
             get_chain,
@@ -1916,17 +1587,11 @@ pub fn run() {
             get_chain_precedents,
             get_chain_reservation_precedents,
             get_global_active_reservation_session,
-            set_reservation_session_pending_ruling,
-            clear_reservation_session_pending_ruling,
             start_reservation_session,
-            get_active_reservation_session,
             fulfill_reservation_and_start_focus,
             expire_reservation_session,
-            fail_reservation_session_reset,
-            precedent_reservation_session_failure,
             get_dashboard_summary,
             get_recent_protocol_events,
-            get_protocol_history,
             create_rsip_formula,
             get_rsip_formulas,
             activate_rsip_formula,
@@ -1934,7 +1599,6 @@ pub fn run() {
             get_formula_events,
             get_rsip_summary,
             get_protocol_timeline,
-            get_setting,
             get_app_settings,
             update_app_setting,
         ])

@@ -6,6 +6,7 @@ import {
   getFormulaEvents,
   getRsipFormulas,
 } from '../lib/db';
+import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
 import type { FormulaEvent, RsipFormula } from '../types';
 
 interface FormulaNode extends RsipFormula {
@@ -31,17 +32,6 @@ function buildTree(formulas: RsipFormula[]): FormulaNode[] {
   };
   sortNodes(roots);
   return roots;
-}
-
-function eventLabel(type: FormulaEvent['event_type']): string {
-  if (type === 'created') return '加入定式树';
-  if (type === 'activated') return '点亮';
-  if (type === 'deactivated') return '熄灭';
-  return '递归回滚';
-}
-
-function formatDateTime(raw: string): string {
-  return new Date(raw + 'Z').toLocaleString('zh-CN');
 }
 
 export default function RSIP() {
@@ -237,11 +227,11 @@ export default function RSIP() {
                   <div key={event.id} className="formula-event">
                     <div className="formula-event-main">
                       <span className={`formula-event-type event-${event.event_type}`}>
-                        {eventLabel(event.event_type)}
+                        {formulaEventLabel(event.event_type)}
                       </span>
                       <span className="formula-event-title">{event.formula_title}</span>
                     </div>
-                    <span className="formula-event-time">{formatDateTime(event.created_at)}</span>
+                    <span className="formula-event-time">{formatProtocolDateTime(event.created_at)}</span>
                     {event.note && <p className="formula-event-note">{event.note}</p>}
                   </div>
                 ))}

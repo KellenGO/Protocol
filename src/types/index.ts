@@ -31,21 +31,7 @@ export interface FocusSession {
   created_at: string;
 }
 
-export interface ReservationSession {
-  id: number;
-  chain_id: number;
-  created_at: string;
-  due_at: string;
-  fulfilled_at: string | null;
-  result: 'fulfilled' | 'failed_reset' | 'failed_precedent' | null;
-  failure_note: string | null;
-  trigger_action: string;
-  completion_condition: string;
-  debug_category: string | null;
-  debug_note: string | null;
-}
-
-export interface Precedent {
+interface Precedent {
   id: number;
   chain_id: number;
   scope: 'main_chain' | 'reservation_chain';
@@ -117,14 +103,20 @@ export interface FulfillReservationResult {
 }
 
 export interface FailReservationResetResult {
-  session: ReservationSession;
+  session: {
+    id: number;
+    chain_id: number;
+    created_at: string;
+    due_at: string;
+    fulfilled_at: string | null;
+    result: 'fulfilled' | 'failed_reset' | 'failed_precedent' | null;
+    failure_note: string | null;
+    trigger_action: string;
+    completion_condition: string;
+    debug_category: string | null;
+    debug_note: string | null;
+  };
   chain: Chain;
-}
-
-export interface FailReservationPrecedentResult {
-  session: ReservationSession;
-  chain: Chain;
-  precedent: Precedent;
 }
 
 export interface DashboardSummary {
@@ -154,20 +146,12 @@ export interface ProtocolEvent {
   duration_minutes: number | null;
 }
 
-export type FormulaStatus = 'inactive' | 'active';
-
-export type FormulaEventType =
-  | 'created'
-  | 'activated'
-  | 'deactivated'
-  | 'rollback_child_deactivated';
-
 export interface RsipFormula {
   id: number;
   parent_id: number | null;
   title: string;
   description: string;
-  status: FormulaStatus;
+  status: 'inactive' | 'active';
   position: number;
   created_at: string;
   updated_at: string;
@@ -179,7 +163,11 @@ export interface FormulaEvent {
   id: number;
   formula_id: number;
   formula_title: string;
-  event_type: FormulaEventType;
+  event_type:
+    | 'created'
+    | 'activated'
+    | 'deactivated'
+    | 'rollback_child_deactivated';
   note: string;
   created_at: string;
 }
@@ -205,12 +193,6 @@ export interface ProtocolTimelineEvent {
   note: string | null;
   precedent_id: number | null;
   precedent_title: string | null;
-}
-
-export interface HistoryFilter {
-  type_filter?: 'focus' | 'reservation' | 'rsip' | null;
-  result_filter?: 'success' | 'failed' | 'precedent' | null;
-  chain_id?: number | null;
 }
 
 export interface AppSetting {

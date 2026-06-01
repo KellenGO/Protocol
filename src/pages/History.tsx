@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getChains, getProtocolTimeline } from '../lib/db';
+import {
+  formatProtocolDateTime,
+  protocolEventTypeLabel,
+  rsipTimelineEventLabel,
+} from '../lib/protocolEvents';
 import type { Chain, ProtocolTimelineEvent } from '../types';
 
 function eventLabel(event: ProtocolTimelineEvent): string {
@@ -27,23 +32,10 @@ function eventLabel(event: ProtocolTimelineEvent): string {
   }
 
   if (event.event_type === 'rsip') {
-    if (event.result === 'created') return 'RSIP 定式创建';
-    if (event.result === 'activated') return 'RSIP 定式点亮';
-    if (event.result === 'deactivated') return 'RSIP 定式熄灭';
-    if (event.result === 'rollback_child_deactivated') return 'RSIP 子定式回滚熄灭';
+    return rsipTimelineEventLabel(event.result);
   }
 
   return event.result;
-}
-
-function eventTypeLabel(type: string): string {
-  if (type === 'focus') return '主链';
-  if (type === 'reservation') return '辅助链';
-  return 'RSIP';
-}
-
-function formatDateTime(raw: string): string {
-  return new Date(raw + 'Z').toLocaleString('zh-CN');
 }
 
 export default function History() {
@@ -115,7 +107,7 @@ export default function History() {
           {events.map((e) => (
             <div key={`${e.event_type}-${e.id}`} className="history-item">
               <div className="history-item-left">
-                <span className={`event-type-badge event-${e.event_type}`}>{eventTypeLabel(e.event_type)}</span>
+                <span className={`event-type-badge event-${e.event_type}`}>{protocolEventTypeLabel(e.event_type)}</span>
                 <div className="history-item-info">
                   {e.event_type === 'rsip' ? (
                     <button className="history-chain-link" onClick={() => navigate('/rsip')}>
@@ -127,8 +119,8 @@ export default function History() {
                     </button>
                   )}
                   <span className="history-event-time">
-                    {formatDateTime(e.event_time)}
-                    {e.ended_at && ` -> ${formatDateTime(e.ended_at)}`}
+                    {formatProtocolDateTime(e.event_time)}
+                    {e.ended_at && ` -> ${formatProtocolDateTime(e.ended_at)}`}
                   </span>
                   {e.note && <span className="history-event-note">争议行为类型：{e.note}</span>}
                 </div>

@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getDashboardSummary, getRecentProtocolEvents, getRsipSummary } from '../lib/db';
+import {
+  formatRelativeProtocolTime,
+  protocolEventTypeLabel,
+  rsipSummaryEventLabel,
+} from '../lib/protocolEvents';
 import type { DashboardSummary, ProtocolEvent, RsipSummary } from '../types';
 
 function eventLabel(event: ProtocolEvent): string {
@@ -14,28 +19,6 @@ function eventLabel(event: ProtocolEvent): string {
     if (event.result === 'failed_precedent') return '辅助链判例化';
   }
   return event.result;
-}
-
-function eventTypeLabel(type: string): string {
-  return type === 'focus' ? '主链' : '辅助链';
-}
-
-function rsipEventLabel(type: string): string {
-  if (type === 'created') return '定式创建';
-  if (type === 'activated') return '定式点亮';
-  if (type === 'deactivated') return '定式熄灭';
-  if (type === 'rollback_child_deactivated') return '递归回滚';
-  return type;
-}
-
-function formatTime(raw: string): string {
-  const d = new Date(raw + 'Z');
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 }
 
 function activeStateLabel(state: DashboardSummary['active_protocol_state']): string {
@@ -100,7 +83,7 @@ export default function Dashboard() {
         <div className="stat-card">
           <span className="stat-label">最近 RSIP 状态</span>
           <span className="stat-value stat-detail">
-            {rsipSummary?.latest_event ? rsipEventLabel(rsipSummary.latest_event.event_type) : '暂无定式事件'}
+            {rsipSummary?.latest_event ? rsipSummaryEventLabel(rsipSummary.latest_event.event_type) : '暂无定式事件'}
           </span>
           {rsipSummary?.latest_event && (
             <span className="stat-detail">{rsipSummary.latest_event.formula_title}</span>
@@ -143,12 +126,12 @@ export default function Dashboard() {
             {events.map((e) => (
               <div key={`${e.event_type}-${e.id}`} className="recent-item">
                 <div className="recent-item-left">
-                  <span className={`event-type-badge event-${e.event_type}`}>{eventTypeLabel(e.event_type)}</span>
+                  <span className={`event-type-badge event-${e.event_type}`}>{protocolEventTypeLabel(e.event_type)}</span>
                   <span className="recent-chain-name">{e.chain_name}</span>
                 </div>
                 <div className="recent-item-right">
                   <span className={`recent-result result-${e.result}`}>{eventLabel(e)}</span>
-                  <span className="recent-time">{formatTime(e.event_time)}</span>
+                  <span className="recent-time">{formatRelativeProtocolTime(e.event_time)}</span>
                 </div>
               </div>
             ))}

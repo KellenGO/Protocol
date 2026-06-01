@@ -232,31 +232,6 @@ body {
   font-size: 14px;
 }
 
-.placeholder-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  padding: 24px;
-  max-width: 560px;
-}
-
-.placeholder-card p {
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.7;
-  margin-bottom: 8px;
-}
-
-.placeholder-card p:last-child {
-  margin-bottom: 0;
-}
-
-.placeholder-hint {
-  color: var(--text-muted);
-  font-size: 13px;
-  margin-top: 12px;
-}
-
 /* ===== Settings ===== */
 
 .settings-list {
@@ -706,26 +681,10 @@ body {
   gap: 8px;
 }
 
-.action-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 8px;
-}
-
 .action-error {
   font-size: 12px;
   color: var(--danger);
   margin-top: 8px;
-}
-
-.recovery-msg {
-  font-size: 13px;
-  color: var(--success);
-  background: rgba(68, 170, 136, 0.08);
-  border: 1px solid rgba(68, 170, 136, 0.2);
-  border-radius: var(--radius-sm);
-  padding: 8px 14px;
-  line-height: 1.5;
 }
 
 .action-warn {
@@ -776,32 +735,6 @@ body {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.6;
-}
-
-.sacred-seat-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.sacred-seat-metrics span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.sacred-seat-metrics strong {
-  font-size: 18px;
-  font-family: var(--font-mono);
-  color: var(--text-primary);
-}
-
-.sacred-seat-actions {
-  margin-top: 0;
 }
 
 .protocol-seat-panel,
@@ -1320,21 +1253,6 @@ body {
 
 /* ===== Reservation ===== */
 
-.reservation-form {
-  max-width: 480px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  padding: 24px;
-}
-
-.res-chain-info {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: 16px;
-  line-height: 1.5;
-}
-
 .form-select {
   padding: 8px 12px;
   border: 1px solid var(--border-light);
@@ -1350,10 +1268,6 @@ body {
 
 .form-select:focus {
   border-color: var(--accent);
-}
-
-.reservation-session {
-  max-width: 520px;
 }
 
 .res-session-header {
@@ -1561,12 +1475,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.history-chain-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
 }
 
 .history-event-time {

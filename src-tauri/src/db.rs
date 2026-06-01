@@ -191,7 +191,12 @@ fn migrate_protocol_config_schema(conn: &Connection) -> SqliteResult<()> {
 
     for table in ["focus_sessions", "reservation_sessions"] {
         add_column_if_missing(conn, table, "trigger_action", "TEXT NOT NULL DEFAULT ''")?;
-        add_column_if_missing(conn, table, "completion_condition", "TEXT NOT NULL DEFAULT ''")?;
+        add_column_if_missing(
+            conn,
+            table,
+            "completion_condition",
+            "TEXT NOT NULL DEFAULT ''",
+        )?;
         add_column_if_missing(conn, table, "debug_category", "TEXT")?;
         add_column_if_missing(conn, table, "debug_note", "TEXT")?;
     }
@@ -210,7 +215,10 @@ fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
         "created_from_context",
     ];
 
-    if !removed_columns.iter().any(|column| columns.iter().any(|existing| existing == column)) {
+    if !removed_columns
+        .iter()
+        .any(|column| columns.iter().any(|existing| existing == column))
+    {
         return Ok(());
     }
 
