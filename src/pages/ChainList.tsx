@@ -24,11 +24,13 @@ export default function ChainList() {
   return (
     <div className="page">
       <div className="page-header">
-        <h2>主链</h2>
-        <button
-          className="btn btn-primary"
-          onClick={() => setShowForm(true)}
-        >
+        <div>
+          <h2>主链</h2>
+          <p className="page-subtitle">
+            每条主链都是一份协议：神圣座位触发动作、持续时间、完成条件，以及一条内嵌辅助链。
+          </p>
+        </div>
+        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
           + 新建主链
         </button>
       </div>
@@ -46,12 +48,12 @@ export default function ChainList() {
       )}
 
       {loading ? (
-        <p className="placeholder-text">加载中…</p>
+        <p className="placeholder-text">加载中...</p>
       ) : chains.length === 0 ? (
         <div className="empty-state">
           <p className="empty-title">还没有主链</p>
           <p className="empty-desc">
-            创建一条主链来开始你的自控协议。每条链代表一项你希望持续执行的专注任务。
+            创建一条主链，先把触发动作和完成条件写清楚，再启动神圣座位。
           </p>
         </div>
       ) : (
@@ -64,9 +66,7 @@ export default function ChainList() {
             >
               <div className="chain-card-main">
                 <span className="chain-card-name">{chain.name}</span>
-                {chain.description && (
-                  <span className="chain-card-desc">{chain.description}</span>
-                )}
+                <span className="chain-card-desc">{chain.trigger_action}</span>
               </div>
               <div className="chain-card-stats">
                 <span className="chain-stat">
@@ -78,10 +78,12 @@ export default function ChainList() {
                   <span className="chain-stat-value">{chain.best_length} 节</span>
                 </span>
                 <span className="chain-stat">
-                  <span className="chain-stat-label">时长</span>
-                  <span className="chain-stat-value">
-                    {chain.focus_duration_minutes}min
-                  </span>
+                  <span className="chain-stat-label">主链</span>
+                  <span className="chain-stat-value">{chain.focus_duration_minutes}min</span>
+                </span>
+                <span className="chain-stat">
+                  <span className="chain-stat-label">辅助链</span>
+                  <span className="chain-stat-value">{chain.auxiliary_delay_minutes}min</span>
                 </span>
                 <span className="chain-card-time">
                   {formatDate(chain.updated_at)}

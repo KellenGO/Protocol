@@ -11,6 +11,7 @@ import {
   getGlobalActiveFocusSession,
   setFocusSessionPendingRuling,
 } from '../lib/db';
+import { FAILURE_DEBUG_CATEGORIES } from '../features/ctdp/protocolOptions';
 import type {
   ActiveFocusSession,
   Chain,
@@ -54,29 +55,6 @@ function resolveBehavior(behaviorType: string, customBehavior: string): string {
   return behaviorType;
 }
 
-function BoundaryList({ precedents }: { precedents: ChainPrecedent[] }) {
-  return (
-    <div className="ruling-boundary">
-      <h4>以下行为已经被写入协议边界，未来默认允许：</h4>
-      {precedents.length === 0 ? (
-        <p className="precedents-empty">当前没有判例，协议边界仍保持严格状态。</p>
-      ) : (
-        <div className="precedents-list">
-          {precedents.map((p) => (
-            <div key={p.id} className="precedent-item">
-              <div className="precedent-item-header">
-                <span className="precedent-item-title">{p.title}</span>
-                <span className="precedent-item-time">{formatDate(p.created_at)}</span>
-              </div>
-              {p.description && <p className="precedent-item-desc">{p.description}</p>}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function FocusSessionPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -92,12 +70,15 @@ export default function FocusSessionPage() {
   const [doneResult, setDoneResult] = useState<DoneResult | null>(null);
   const [behaviorType, setBehaviorType] = useState(behaviorTypes[0]);
   const [customBehavior, setCustomBehavior] = useState('');
+  const [debugCategory, setDebugCategory] = useState(FAILURE_DEBUG_CATEGORIES[0]);
+  const [debugNote, setDebugNote] = useState('');
   const [rulingError, setRulingError] = useState('');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!chainId) return;
+    let cancelled = false;
 
     async function init() {
       try {
@@ -106,6 +87,8 @@ export default function FocusSessionPage() {
           getChainPrecedents(chainId),
           getActiveFocusSession(chainId),
         ]);
+        if (cancelled) return;
+
         setChain(c);
         setPrecedents(p);
 
@@ -113,12 +96,12 @@ export default function FocusSessionPage() {
           setSession(active);
           if (searchParams.get('mode') === 'ruling') {
             await setFocusSessionPendingRuling(active.id);
-            setPhase('ruling');
+            if (!cancelled) setPhase('ruling');
             return;
           }
 
           const globalPending = await getGlobalActiveFocusSession();
-          if (globalPending?.id === active.id && globalPending.pending_ruling) {
+          if (!cancelled && globalPending?.id === active.id && globalPending.pending_ruling) {
             setPhase('ruling');
             return;
           }
@@ -130,11 +113,14 @@ export default function FocusSessionPage() {
           setPhase('empty');
         }
       } catch (err) {
-        setError(String(err));
+        if (!cancelled) setError(String(err));
       }
     }
 
     init();
+    return () => {
+      cancelled = true;
+    };
   }, [chainId, searchParams]);
 
   useEffect(() => {
@@ -188,8 +174,8 @@ export default function FocusSessionPage() {
   async function handleComplete() {
     if (!session) return;
     try {
-      const r = await completeFocusSession(session.id);
-      setDoneResult({ kind: 'completed', data: r });
+      const result = await completeFocusSession(session.id);
+      setDoneResult({ kind: 'completed', data: result });
       setPhase('done');
     } catch (err) {
       setError(String(err));
@@ -200,8 +186,13 @@ export default function FocusSessionPage() {
     const behavior = getBehavior();
     if (!session || !behavior) return;
     try {
-      const r = await failFocusSessionReset(session.id, behavior);
-      setDoneResult({ kind: 'failed_reset', data: r });
+      const result = await failFocusSessionReset(
+        session.id,
+        behavior,
+        debugCategory,
+        debugNote,
+      );
+      setDoneResult({ kind: 'failed_reset', data: result });
       setPhase('done');
     } catch (err) {
       setRulingError(String(err));
@@ -212,11 +203,13 @@ export default function FocusSessionPage() {
     const behavior = getBehavior();
     if (!session || !behavior) return;
     try {
-      const r = await failFocusSessionPrecedent(session.id, {
-        title: behavior,
-        description: '',
-      });
-      setDoneResult({ kind: 'failed_precedent', data: r });
+      const result = await failFocusSessionPrecedent(
+        session.id,
+        { title: behavior, description: '' },
+        debugCategory,
+        debugNote,
+      );
+      setDoneResult({ kind: 'failed_precedent', data: result });
       setPhase('done');
     } catch (err) {
       setRulingError(String(err));
@@ -237,7 +230,7 @@ export default function FocusSessionPage() {
   if (phase === 'loading') {
     return (
       <div className="page">
-        <p className="placeholder-text">正在准备正式任务...</p>
+        <p className="placeholder-text">正在准备神圣座位...</p>
       </div>
     );
   }
@@ -246,8 +239,8 @@ export default function FocusSessionPage() {
     return (
       <div className="page">
         <div className="empty-state">
-          <p className="empty-title">没有进行中的正式任务</p>
-          <p className="empty-desc">当前主链没有活跃任务。请回到链详情页启动新的协议流程。</p>
+          <p className="empty-title">没有进行中的神圣座位</p>
+          <p className="empty-desc">当前主链没有活跃任务。请回到链详情页启动主链或辅助链。</p>
         </div>
         <div style={{ textAlign: 'center', marginTop: 16 }}>
           <button className="btn btn-primary" onClick={() => navigate(`/chains/${chainId}`)}>
@@ -268,7 +261,7 @@ export default function FocusSessionPage() {
         <div className="ruling-panel ruling-panel-wide">
           <h3>主链裁决</h3>
           <p className="ruling-desc">
-            你正在做出一次协议裁决。判定违规会导致当前主链断裂并清零；判例化则意味着该行为将成为未来永久允许的先例。
+            神圣座位已经被占用。现在要么判定违约并断链，要么把这类情况写成判例，成为未来协议边界的一部分。
           </p>
 
           <BehaviorTypeField
@@ -277,14 +270,19 @@ export default function FocusSessionPage() {
             setBehaviorType={setBehaviorType}
             setCustomBehavior={setCustomBehavior}
           />
-
+          <DebugFields
+            debugCategory={debugCategory}
+            debugNote={debugNote}
+            setDebugCategory={setDebugCategory}
+            setDebugNote={setDebugNote}
+          />
           <BoundaryList precedents={precedents} />
 
           {rulingError && <p className="form-error">{rulingError}</p>}
           <div className="ruling-options">
             <button className="ruling-option ruling-reset" onClick={handleRulingReset}>
-              <span className="ruling-option-title">判定违规：主链断裂并清零</span>
-              <span className="ruling-option-consequence">本次事件写入协议时间线。</span>
+              <span className="ruling-option-title">判定违约：主链断裂并清零</span>
+              <span className="ruling-option-consequence">记录失败调试；本次事件写入协议时间线。</span>
             </button>
 
             <button className="ruling-option ruling-precedent" onClick={handleRulingPrecedent}>
@@ -293,8 +291,8 @@ export default function FocusSessionPage() {
             </button>
           </div>
 
-          <button className="btn btn-secondary" style={{ marginTop: 12 }} onClick={returnToTask}>
-            返回任务
+          <button className="btn btn-secondary" onClick={returnToTask}>
+            返回神圣座位
           </button>
         </div>
       </div>
@@ -305,23 +303,28 @@ export default function FocusSessionPage() {
 
   return (
     <div className="page">
-      {chain && (
+      {chain && session && (
         <>
           <div className="focus-header">
             <h2>{chain.name}</h2>
             <span className="focus-chain-length">
-              当前 {chain.current_length} 节 / 本次 {chain.focus_duration_minutes} 分钟
+              神圣座位已占用 / 当前 {chain.current_length} 节 / 本次 {session.duration_minutes ?? chain.focus_duration_minutes} 分钟
             </span>
+          </div>
+
+          <div className="focus-protocol-snapshot">
+            <ProtocolSnapshot label="触发动作" value={session.trigger_action} />
+            <ProtocolSnapshot label="完成条件" value={session.completion_condition} />
           </div>
 
           <div className={`focus-timer ${isTimerDone ? 'timer-done' : ''}`}>
             <span className="focus-time">{formatTime(remaining)}</span>
-            <span className="focus-status">{isTimerDone ? '时间已到' : '协议进行中'}</span>
+            <span className="focus-status">{isTimerDone ? '时间已到' : '神圣座位进行中'}</span>
           </div>
 
           {isTimerDone ? (
             <button className="btn btn-primary btn-large" onClick={handleComplete}>
-              确认正式任务完成
+              确认主链完成
             </button>
           ) : (
             <button className="btn btn-danger-outline" onClick={enterRuling}>
@@ -334,6 +337,15 @@ export default function FocusSessionPage() {
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+function ProtocolSnapshot({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="protocol-fact">
+      <span className="detail-label">{label}</span>
+      <span className="protocol-fact-value">{value}</span>
     </div>
   );
 }
@@ -365,8 +377,70 @@ function BehaviorTypeField({
       {behaviorType === '其他' && (
         <label className="form-field">
           <span>自定义争议行为</span>
-          <input value={customBehavior} onChange={(e) => setCustomBehavior(e.target.value)} placeholder="简短描述争议行为" />
+          <input
+            value={customBehavior}
+            onChange={(e) => setCustomBehavior(e.target.value)}
+            placeholder="简短描述争议行为"
+          />
         </label>
+      )}
+    </div>
+  );
+}
+
+function DebugFields({
+  debugCategory,
+  debugNote,
+  setDebugCategory,
+  setDebugNote,
+}: {
+  debugCategory: string;
+  debugNote: string;
+  setDebugCategory: (value: string) => void;
+  setDebugNote: (value: string) => void;
+}) {
+  return (
+    <div className="debug-fields">
+      <label className="form-field">
+        <span>失败调试分类</span>
+        <select className="form-select" value={debugCategory} onChange={(e) => setDebugCategory(e.target.value)}>
+          {FAILURE_DEBUG_CATEGORIES.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="form-field">
+        <span>调试备注</span>
+        <textarea
+          value={debugNote}
+          onChange={(e) => setDebugNote(e.target.value)}
+          placeholder="可选：记录下次调整协议时要看的线索"
+        />
+      </label>
+    </div>
+  );
+}
+
+function BoundaryList({ precedents }: { precedents: ChainPrecedent[] }) {
+  return (
+    <div className="ruling-boundary">
+      <h4>主链现有边界</h4>
+      {precedents.length === 0 ? (
+        <p className="precedents-empty">当前没有判例，协议边界仍保持严格。</p>
+      ) : (
+        <div className="precedents-list">
+          {precedents.map((p) => (
+            <div key={p.id} className="precedent-item">
+              <div className="precedent-item-header">
+                <span className="precedent-item-title">{p.title}</span>
+                <span className="precedent-item-time">{formatDate(p.created_at)}</span>
+              </div>
+              {p.description && <p className="precedent-item-desc">{p.description}</p>}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -387,7 +461,7 @@ function DoneView({
       <div className="page">
         <div className="focus-complete">
           <div className="focus-complete-icon">&#10003;</div>
-          <h2>正式任务完成</h2>
+          <h2>主链完成</h2>
           <div className="detail-grid">
             <div className="detail-item">
               <span className="detail-label">专注时长</span>
@@ -415,8 +489,8 @@ function DoneView({
       <div className="page">
         <div className="focus-complete">
           <div className="focus-complete-icon focus-fail-icon">&#10007;</div>
-          <h2>主链裁决：判定违规</h2>
-          <p className="ruling-result-desc">链条已断裂并清零；本次裁决已写入协议时间线。</p>
+          <h2>主链裁决：判定违约</h2>
+          <p className="ruling-result-desc">链条已断裂并清零；失败调试已记录到本次会话。</p>
           <ChainUpdate chain={updated} forceCurrent={0} />
           <button className="btn btn-primary" onClick={() => navigate(`/chains/${chainId}`)}>返回链详情</button>
         </div>
@@ -431,7 +505,7 @@ function DoneView({
         <div className="focus-complete">
           <div className="focus-complete-icon focus-precedent-icon">&#9702;</div>
           <h2>主链判例化</h2>
-          <p className="ruling-result-desc">允许“{precedent.title}”，未来同类行为默认允许；当前主链未清零。</p>
+          <p className="ruling-result-desc">新的协议边界已写入：{precedent.title}</p>
           <ChainUpdate chain={updated} />
           <div className="precedent-ref">
             <span className="precedent-ref-label">新增协议边界</span>

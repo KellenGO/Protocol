@@ -5,7 +5,12 @@ CREATE TABLE IF NOT EXISTS chains (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
+    trigger_action TEXT NOT NULL DEFAULT '开始正式任务',
+    completion_condition TEXT NOT NULL DEFAULT '',
     focus_duration_minutes INTEGER NOT NULL DEFAULT 25,
+    auxiliary_trigger_action TEXT NOT NULL DEFAULT '启动辅助链',
+    auxiliary_delay_minutes INTEGER NOT NULL DEFAULT 15,
+    auxiliary_completion_condition TEXT NOT NULL DEFAULT '',
     current_length INTEGER NOT NULL DEFAULT 0,
     best_length INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
@@ -22,6 +27,10 @@ CREATE TABLE IF NOT EXISTS focus_sessions (
     duration_minutes INTEGER,
     result TEXT CHECK(result IN ('completed', 'failed_reset', 'failed_precedent')),
     failure_note TEXT,
+    trigger_action TEXT NOT NULL DEFAULT '',
+    completion_condition TEXT NOT NULL DEFAULT '',
+    debug_category TEXT,
+    debug_note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
 );
@@ -34,6 +43,10 @@ CREATE TABLE IF NOT EXISTS reservation_sessions (
     fulfilled_at TEXT,
     result TEXT CHECK(result IN ('fulfilled', 'failed_reset', 'failed_precedent')),
     failure_note TEXT,
+    trigger_action TEXT NOT NULL DEFAULT '',
+    completion_condition TEXT NOT NULL DEFAULT '',
+    debug_category TEXT,
+    debug_note TEXT,
     FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
 );
 

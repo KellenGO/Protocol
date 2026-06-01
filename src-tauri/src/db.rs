@@ -33,7 +33,12 @@ impl Database {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
+                trigger_action TEXT NOT NULL DEFAULT '开始正式任务',
+                completion_condition TEXT NOT NULL DEFAULT '',
                 focus_duration_minutes INTEGER NOT NULL DEFAULT 25,
+                auxiliary_trigger_action TEXT NOT NULL DEFAULT '启动辅助链',
+                auxiliary_delay_minutes INTEGER NOT NULL DEFAULT 15,
+                auxiliary_completion_condition TEXT NOT NULL DEFAULT '',
                 current_length INTEGER NOT NULL DEFAULT 0,
                 best_length INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
@@ -50,6 +55,10 @@ impl Database {
                 duration_minutes INTEGER,
                 result TEXT CHECK(result IN ('completed', 'failed_reset', 'failed_precedent')),
                 failure_note TEXT,
+                trigger_action TEXT NOT NULL DEFAULT '',
+                completion_condition TEXT NOT NULL DEFAULT '',
+                debug_category TEXT,
+                debug_note TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
             );
@@ -62,6 +71,10 @@ impl Database {
                 fulfilled_at TEXT,
                 result TEXT CHECK(result IN ('fulfilled', 'failed_reset', 'failed_precedent')),
                 failure_note TEXT,
+                trigger_action TEXT NOT NULL DEFAULT '',
+                completion_condition TEXT NOT NULL DEFAULT '',
+                debug_category TEXT,
+                debug_note TEXT,
                 FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
             );
 
@@ -112,16 +125,82 @@ impl Database {
         )?;
 
         migrate_precedents_to_core_schema(&conn)?;
+        migrate_protocol_config_schema(&conn)?;
 
         Ok(())
     }
 }
 
-fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
-    let mut stmt = conn.prepare("PRAGMA table_info(precedents)")?;
+fn table_columns(conn: &Connection, table: &str) -> SqliteResult<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
     let columns = stmt
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<SqliteResult<Vec<String>>>()?;
+    Ok(columns)
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> SqliteResult<()> {
+    let columns = table_columns(conn, table)?;
+    if columns.iter().any(|existing| existing == column) {
+        return Ok(());
+    }
+
+    conn.execute_batch(&format!(
+        "ALTER TABLE {} ADD COLUMN {} {};",
+        table, column, definition
+    ))?;
+    Ok(())
+}
+
+fn migrate_protocol_config_schema(conn: &Connection) -> SqliteResult<()> {
+    add_column_if_missing(
+        conn,
+        "chains",
+        "trigger_action",
+        "TEXT NOT NULL DEFAULT '开始正式任务'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "chains",
+        "completion_condition",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    add_column_if_missing(
+        conn,
+        "chains",
+        "auxiliary_trigger_action",
+        "TEXT NOT NULL DEFAULT '启动辅助链'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "chains",
+        "auxiliary_delay_minutes",
+        "INTEGER NOT NULL DEFAULT 15",
+    )?;
+    add_column_if_missing(
+        conn,
+        "chains",
+        "auxiliary_completion_condition",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+
+    for table in ["focus_sessions", "reservation_sessions"] {
+        add_column_if_missing(conn, table, "trigger_action", "TEXT NOT NULL DEFAULT ''")?;
+        add_column_if_missing(conn, table, "completion_condition", "TEXT NOT NULL DEFAULT ''")?;
+        add_column_if_missing(conn, table, "debug_category", "TEXT")?;
+        add_column_if_missing(conn, table, "debug_note", "TEXT")?;
+    }
+
+    Ok(())
+}
+
+fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
+    let columns = table_columns(conn, "precedents")?;
 
     let removed_columns = [
         "category",

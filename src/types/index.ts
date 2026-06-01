@@ -2,7 +2,12 @@ export interface Chain {
   id: number;
   name: string;
   description: string;
+  trigger_action: string;
+  completion_condition: string;
   focus_duration_minutes: number;
+  auxiliary_trigger_action: string;
+  auxiliary_delay_minutes: number;
+  auxiliary_completion_condition: string;
   current_length: number;
   best_length: number;
   status: 'active' | 'archived';
@@ -19,6 +24,10 @@ export interface FocusSession {
   duration_minutes: number | null;
   result: 'completed' | 'failed_reset' | 'failed_precedent' | null;
   failure_note: string | null;
+  trigger_action: string;
+  completion_condition: string;
+  debug_category: string | null;
+  debug_note: string | null;
   created_at: string;
 }
 
@@ -30,6 +39,10 @@ export interface ReservationSession {
   fulfilled_at: string | null;
   result: 'fulfilled' | 'failed_reset' | 'failed_precedent' | null;
   failure_note: string | null;
+  trigger_action: string;
+  completion_condition: string;
+  debug_category: string | null;
+  debug_note: string | null;
 }
 
 export interface Precedent {
@@ -49,6 +62,8 @@ export interface ActiveFocusSession {
   started_at: string;
   expected_end_at: string | null;
   duration_minutes: number | null;
+  trigger_action: string;
+  completion_condition: string;
 }
 
 export interface CompleteFocusResult {
@@ -82,6 +97,8 @@ export interface ActiveReservationSession {
   chain_id: number;
   created_at: string;
   due_at: string;
+  trigger_action: string;
+  completion_condition: string;
 }
 
 export interface GlobalActiveFocusSession extends ActiveFocusSession {

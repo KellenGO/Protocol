@@ -83,7 +83,12 @@ export async function getProtocolTimeline(filter: {
 export async function createChain(params: {
   name: string;
   description: string;
+  triggerAction: string;
+  completionCondition: string;
   focusDurationMinutes: number;
+  auxiliaryTriggerAction: string;
+  auxiliaryDelayMinutes: number;
+  auxiliaryCompletionCondition: string;
 }): Promise<Chain> {
   return invoke('create_chain', params);
 }
@@ -93,7 +98,12 @@ export async function updateChain(
   params: {
     name: string;
     description: string;
+    triggerAction: string;
+    completionCondition: string;
     focusDurationMinutes: number;
+    auxiliaryTriggerAction: string;
+    auxiliaryDelayMinutes: number;
+    auxiliaryCompletionCondition: string;
   },
 ): Promise<Chain> {
   return invoke('update_chain', { id, ...params });
@@ -129,12 +139,8 @@ export async function clearReservationSessionPendingRuling(reservationId: number
 
 export async function startFocusSession(
   chainId: number,
-  durationMinutes: number,
 ): Promise<ActiveFocusSession> {
-  return invoke('start_focus_session', {
-    chainId,
-    durationMinutes,
-  });
+  return invoke('start_focus_session', { chainId });
 }
 
 export async function getActiveFocusSession(
@@ -152,21 +158,29 @@ export async function completeFocusSession(
 export async function failFocusSessionReset(
   sessionId: number,
   behaviorType?: string,
+  debugCategory?: string,
+  debugNote?: string,
 ): Promise<FailResetResult> {
   return invoke('fail_focus_session_reset', {
     sessionId,
     behaviorType: behaviorType ?? null,
+    debugCategory: debugCategory ?? null,
+    debugNote: debugNote ?? null,
   });
 }
 
 export async function failFocusSessionPrecedent(
   sessionId: number,
   input: PrecedentInput,
+  debugCategory?: string,
+  debugNote?: string,
 ): Promise<FailPrecedentResult> {
   return invoke('fail_focus_session_precedent', {
     sessionId,
     title: input.title,
     description: input.description,
+    debugCategory: debugCategory ?? null,
+    debugNote: debugNote ?? null,
   });
 }
 
@@ -184,9 +198,8 @@ export async function getChainReservationPrecedents(
 
 export async function startReservationSession(
   chainId: number,
-  delayMinutes: number,
 ): Promise<ActiveReservationSession> {
-  return invoke('start_reservation_session', { chainId, delayMinutes });
+  return invoke('start_reservation_session', { chainId });
 }
 
 export async function getActiveReservationSession(
@@ -201,24 +214,38 @@ export async function fulfillReservationAndStartFocus(
   return invoke('fulfill_reservation_and_start_focus', { reservationId });
 }
 
+export async function expireReservationSession(
+  reservationId: number,
+): Promise<FailReservationResetResult> {
+  return invoke('expire_reservation_session', { reservationId });
+}
+
 export async function failReservationSessionReset(
   reservationId: number,
   behaviorType?: string,
+  debugCategory?: string,
+  debugNote?: string,
 ): Promise<FailReservationResetResult> {
   return invoke('fail_reservation_session_reset', {
     reservationId,
     behaviorType: behaviorType ?? null,
+    debugCategory: debugCategory ?? null,
+    debugNote: debugNote ?? null,
   });
 }
 
 export async function precedentReservationSessionFailure(
   reservationId: number,
   input: PrecedentInput,
+  debugCategory?: string,
+  debugNote?: string,
 ): Promise<FailReservationPrecedentResult> {
   return invoke('precedent_reservation_session_failure', {
     reservationId,
     title: input.title,
     description: input.description,
+    debugCategory: debugCategory ?? null,
+    debugNote: debugNote ?? null,
   });
 }
 

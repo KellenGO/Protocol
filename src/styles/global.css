@@ -537,7 +537,7 @@ body {
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
   padding: 24px;
-  max-width: 480px;
+  max-width: 640px;
 }
 
 .chain-form h3 {
@@ -610,6 +610,25 @@ body {
   display: flex;
   gap: 8px;
   margin-top: 4px;
+}
+
+.form-section {
+  border-top: 1px solid var(--border-light);
+  padding-top: 18px;
+  margin-top: 18px;
+}
+
+.form-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.form-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary);
 }
 
 /* ===== Chain Detail ===== */
@@ -783,6 +802,120 @@ body {
 
 .sacred-seat-actions {
   margin-top: 0;
+}
+
+.protocol-seat-panel,
+.auxiliary-panel,
+.auxiliary-runtime {
+  max-width: 840px;
+}
+
+.protocol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.protocol-fact {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.protocol-fact-value {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.auxiliary-panel {
+  margin-top: 14px;
+  padding: 18px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+}
+
+.auxiliary-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.auxiliary-copy h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.auxiliary-copy p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.protocol-actions {
+  max-width: 840px;
+  margin-top: 16px;
+  margin-bottom: 22px;
+}
+
+.protocol-actions .action-warn,
+.protocol-actions .action-error {
+  flex-basis: 100%;
+  margin: 0 0 4px 0;
+}
+
+.auxiliary-runtime {
+  margin-top: 18px;
+  padding: 18px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+}
+
+.auxiliary-runtime h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.boundary-source {
+  display: inline-flex;
+  margin-right: 8px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--accent-subtle);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.debug-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.debug-fields .form-field {
+  margin-bottom: 0;
+}
+
+.focus-protocol-snapshot {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+  max-width: 760px;
 }
 
 /* ===== Global Focus Button ===== */

@@ -4,18 +4,26 @@ import { getChains, getProtocolTimeline } from '../lib/db';
 import type { Chain, ProtocolTimelineEvent } from '../types';
 
 function eventLabel(event: ProtocolTimelineEvent): string {
-  const title = event.precedent_title ?? event.note ?? '该情形';
+  const title = event.precedent_title ?? event.note ?? '详情';
 
   if (event.event_type === 'focus') {
-    if (event.result === 'completed') return '正式任务完成：协议节点完成，主链延续';
-    if (event.result === 'failed_reset') return `主链裁决：${event.note ? `争议行为为“${event.note}”，` : ''}链条已断裂并清零`;
-    if (event.result === 'failed_precedent') return `主链判例化：允许“${title}”，未来同类行为默认允许`;
+    if (event.result === 'completed') return '主链完成：神圣座位完成，链长延续';
+    if (event.result === 'failed_reset') {
+      return `主链裁决：${event.note ? `争议行为为“${event.note}”，` : ''}链条断裂并清零`;
+    }
+    if (event.result === 'failed_precedent') {
+      return `主链判例化：允许“${title}”，未来同类行为默认允许`;
+    }
   }
 
   if (event.event_type === 'reservation') {
-    if (event.result === 'fulfilled') return '预约履约：已在约定时间进入正式任务';
-    if (event.result === 'failed_reset') return `预约违约裁决：${event.note ? `未履约类型为“${event.note}”，` : ''}预约失败记录成立`;
-    if (event.result === 'failed_precedent') return `预约判例化：允许“${title}”，未来同类情况默认允许`;
+    if (event.result === 'fulfilled') return '辅助链履约：按约定进入神圣座位';
+    if (event.result === 'failed_reset') {
+      return `辅助链失败：${event.note ? `${event.note}，` : ''}主链长度不受影响`;
+    }
+    if (event.result === 'failed_precedent') {
+      return `辅助链判例化：允许“${title}”，未来同类情况默认允许`;
+    }
   }
 
   if (event.event_type === 'rsip') {
@@ -30,7 +38,7 @@ function eventLabel(event: ProtocolTimelineEvent): string {
 
 function eventTypeLabel(type: string): string {
   if (type === 'focus') return '主链';
-  if (type === 'reservation') return '预约';
+  if (type === 'reservation') return '辅助链';
   return 'RSIP';
 }
 
@@ -64,6 +72,8 @@ export default function History() {
       .finally(() => setLoading(false));
   }, [typeFilter, resultFilter, chainFilter]);
 
+  const hasFilter = typeFilter || resultFilter || chainFilter;
+
   return (
     <div className="page">
       <h2>协议时间线</h2>
@@ -72,14 +82,14 @@ export default function History() {
         <select className="form-select filter-select" value={typeFilter ?? ''} onChange={(e) => setTypeFilter(e.target.value || null)}>
           <option value="">全部类型</option>
           <option value="focus">主链</option>
-          <option value="reservation">预约</option>
+          <option value="reservation">辅助链</option>
           <option value="rsip">RSIP</option>
         </select>
 
         <select className="form-select filter-select" value={resultFilter ?? ''} onChange={(e) => setResultFilter(e.target.value || null)}>
           <option value="">全部结果</option>
           <option value="success">完成 / 履约 / 点亮</option>
-          <option value="failed">断链 / 违约 / 熄灭</option>
+          <option value="failed">断链 / 未履约 / 熄灭</option>
           <option value="precedent">判例化</option>
         </select>
 
@@ -95,9 +105,9 @@ export default function History() {
         <p className="placeholder-text">加载中...</p>
       ) : events.length === 0 ? (
         <div className="empty-state" style={{ marginTop: 40 }}>
-          <p className="empty-title">{typeFilter || resultFilter || chainFilter ? '没有匹配的协议事件' : '暂无协议事件'}</p>
+          <p className="empty-title">{hasFilter ? '没有匹配的协议事件' : '暂无协议事件'}</p>
           <p className="empty-desc">
-            {typeFilter || resultFilter || chainFilter ? '尝试调整筛选条件。' : '完成任务、预约履约或做出裁决后，事件会出现在这里。'}
+            {hasFilter ? '尝试调整筛选条件。' : '完成主链、辅助链履约或做出裁决后，事件会出现在这里。'}
           </p>
         </div>
       ) : (

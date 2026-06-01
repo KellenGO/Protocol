@@ -73,13 +73,13 @@ export default function GlobalFocusButton() {
   const target =
     active.kind === 'focus'
       ? `/chains/${active.data.chain_id}/focus${active.data.pending_ruling ? '?mode=ruling' : ''}`
-      : `/reservation${active.data.pending_ruling ? '?mode=ruling' : ''}`;
+      : `/chains/${active.data.chain_id}?mode=aux`;
 
   return (
     <>
       {showToast && (
         <div className="global-toast">
-          专注时间已到，请确认完成任务
+          神圣座位时间已到，请确认主链完成
         </div>
       )}
 
@@ -96,10 +96,10 @@ export default function GlobalFocusButton() {
 
 function getLabel(active: NonNullable<GlobalActiveState>, isDue: boolean): string {
   if (active.kind === 'focus') {
-    if (active.data.pending_ruling) return '主链待裁决';
-    return isDue ? '专注已完成' : '回到专注';
+    if (active.data.pending_ruling) return '神圣座位待裁决';
+    return isDue ? '主链待完成' : '回到神圣座位';
   }
 
-  if (active.data.pending_ruling) return '预约待裁决';
-  return '查看预约';
+  if (active.data.pending_ruling) return '辅助链预约中';
+  return isDue ? '辅助链已过期' : '辅助链预约中';
 }

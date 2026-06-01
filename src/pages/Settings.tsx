@@ -8,7 +8,6 @@ function getValue(settings: AppSetting[], key: string): string {
 
 export default function Settings() {
   const [loading, setLoading] = useState(true);
-
   const [focusDur, setFocusDur] = useState('');
   const [reservationDur, setReservationDur] = useState('');
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -45,7 +44,7 @@ export default function Settings() {
     return (
       <div className="page">
         <h2>设置</h2>
-        <p className="placeholder-text">加载中…</p>
+        <p className="placeholder-text">加载中...</p>
       </div>
     );
   }
@@ -59,9 +58,9 @@ export default function Settings() {
       <div className="settings-list">
         <div className="settings-item">
           <div className="settings-item-info">
-            <span className="settings-item-label">默认正式任务时长</span>
+            <span className="settings-item-label">默认主链持续时间</span>
             <span className="settings-item-hint">
-              新建主链时的默认专注时长（分钟）
+              新建主链时的默认神圣座位时长，单位分钟。
             </span>
           </div>
           <div className="settings-item-control">
@@ -77,16 +76,16 @@ export default function Settings() {
               disabled={saving['default_focus_duration']}
               onClick={() => saveSetting('default_focus_duration', focusDur)}
             >
-              {saving['default_focus_duration'] ? '保存中…' : '保存'}
+              {saving['default_focus_duration'] ? '保存中...' : '保存'}
             </button>
           </div>
         </div>
 
         <div className="settings-item">
           <div className="settings-item-info">
-            <span className="settings-item-label">默认预约时长</span>
+            <span className="settings-item-label">默认辅助链预约时间</span>
             <span className="settings-item-hint">
-              新建预约时的默认延迟（分钟）
+              新建主链时辅助链的默认延迟，单位分钟。
             </span>
           </div>
           <div className="settings-item-control">
@@ -102,7 +101,7 @@ export default function Settings() {
               disabled={saving['default_reservation_duration']}
               onClick={() => saveSetting('default_reservation_duration', reservationDur)}
             >
-              {saving['default_reservation_duration'] ? '保存中…' : '保存'}
+              {saving['default_reservation_duration'] ? '保存中...' : '保存'}
             </button>
           </div>
         </div>
@@ -110,11 +109,9 @@ export default function Settings() {
         <div className="settings-item">
           <div className="settings-item-info">
             <span className="settings-item-label">桌面通知</span>
-            <span className="settings-item-hint">
-              后续版本支持
-            </span>
+            <span className="settings-item-hint">后续版本支持</span>
           </div>
-          <span className="settings-value-muted">—</span>
+          <span className="settings-value-muted">-</span>
         </div>
       </div>
     </div>

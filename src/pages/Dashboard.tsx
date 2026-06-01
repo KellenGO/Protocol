@@ -5,19 +5,19 @@ import type { DashboardSummary, ProtocolEvent, RsipSummary } from '../types';
 
 function eventLabel(event: ProtocolEvent): string {
   if (event.event_type === 'focus') {
-    if (event.result === 'completed') return '正式任务完成';
-    if (event.result === 'failed_reset') return '主链裁决：链条断裂';
+    if (event.result === 'completed') return '主链完成';
+    if (event.result === 'failed_reset') return '神圣座位裁决：断链';
     if (event.result === 'failed_precedent') return '主链判例化';
   } else {
-    if (event.result === 'fulfilled') return '预约履约';
-    if (event.result === 'failed_reset') return '预约违约裁决';
-    if (event.result === 'failed_precedent') return '预约判例化';
+    if (event.result === 'fulfilled') return '辅助链履约';
+    if (event.result === 'failed_reset') return '辅助链失败';
+    if (event.result === 'failed_precedent') return '辅助链判例化';
   }
   return event.result;
 }
 
 function eventTypeLabel(type: string): string {
-  return type === 'focus' ? '主链' : '预约';
+  return type === 'focus' ? '主链' : '辅助链';
 }
 
 function rsipEventLabel(type: string): string {
@@ -39,11 +39,11 @@ function formatTime(raw: string): string {
 }
 
 function activeStateLabel(state: DashboardSummary['active_protocol_state']): string {
-  if (state === 'focus') return '正式任务进行中';
-  if (state === 'focus_pending_ruling') return '主链待裁决';
-  if (state === 'reservation_countdown') return '预约进行中';
-  if (state === 'reservation_due') return '预约已到期，待履约';
-  if (state === 'reservation_pending_ruling') return '预约待裁决';
+  if (state === 'focus') return '神圣座位已占用';
+  if (state === 'focus_pending_ruling') return '神圣座位待裁决';
+  if (state === 'reservation_countdown') return '辅助链预约中';
+  if (state === 'reservation_due') return '辅助链已自动失败';
+  if (state === 'reservation_pending_ruling') return '辅助链预约中';
   return '无活跃协议流程';
 }
 
@@ -79,7 +79,7 @@ export default function Dashboard() {
           <span className="stat-value">{summary?.max_current_chain_length ?? '-'} 节</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">今日完成任务</span>
+          <span className="stat-label">今日完成主链</span>
           <span className="stat-value">{summary?.today_completed_focus_count ?? '-'}</span>
         </div>
         <div className="stat-card">
@@ -87,11 +87,11 @@ export default function Dashboard() {
           <span className="stat-value">{summary?.total_completed_focus_count ?? '-'}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">当前活跃协议状态</span>
+          <span className="stat-label">当前协议状态</span>
           <span className="stat-value stat-detail">{activeStateLabel(activeState)}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-label">RSIP 定式树</span>
+          <span className="stat-label">RSIP 定式格</span>
           <span className="stat-value">{rsipSummary?.total_formulas ?? '-'}</span>
           <span className="stat-detail">
             已点亮 {rsipSummary?.active_formulas ?? '-'} / 未点亮 {rsipSummary?.inactive_formulas ?? '-'}
@@ -116,23 +116,22 @@ export default function Dashboard() {
               className="btn btn-primary"
               onClick={() => navigate(`/chains/${summary.active_chain_id}/focus${activeState === 'focus_pending_ruling' ? '?mode=ruling' : ''}`)}
             >
-              {activeState === 'focus_pending_ruling' ? '回到裁决' : '恢复任务'}
+              {activeState === 'focus_pending_ruling' ? '回到裁决' : '回到神圣座位'}
             </button>
           ) : (
             <button
               className="btn btn-primary"
-              onClick={() => navigate(`/reservation${activeState === 'reservation_pending_ruling' ? '?mode=ruling' : ''}`)}
+              onClick={() => navigate(`/chains/${summary.active_chain_id}?mode=aux`)}
             >
-              {activeState === 'reservation_pending_ruling' ? '回到裁决' : '查看预约'}
+              查看辅助链
             </button>
           )}
         </div>
       )}
 
       <div className="quick-actions">
-        <button className="btn btn-secondary" onClick={() => navigate('/chains')}>CTDP 链列表</button>
-        <button className="btn btn-secondary" onClick={() => navigate('/reservation')}>预约启动</button>
-        <button className="btn btn-secondary" onClick={() => navigate('/rsip')}>RSIP 定式树</button>
+        <button className="btn btn-secondary" onClick={() => navigate('/chains')}>CTDP 主链</button>
+        <button className="btn btn-secondary" onClick={() => navigate('/rsip')}>RSIP 定式格</button>
       </div>
 
       <div className="recent-section">
