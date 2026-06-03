@@ -4,6 +4,7 @@ import GlobalFocusButton from './components/GlobalFocusButton';
 import Dashboard from './pages/Dashboard';
 import ChainList from './pages/ChainList';
 import ChainDetail from './pages/ChainDetail';
+import DataManagement from './pages/DataManagement';
 import FocusSessionPage from './pages/FocusSession';
 import History from './pages/History';
 import RSIP from './pages/RSIP';
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/history" element={<History />} />
             <Route path="/rsip" element={<RSIP />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/data-management" element={<DataManagement />} />
           </Routes>
         </main>
       </div>
