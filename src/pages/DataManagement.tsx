@@ -5,15 +5,22 @@ import {
   getDatabaseInfo,
   backupDatabase,
   restoreDatabase,
+  inspectBackupFile,
   exportHistoryJson,
-  cleanTestData,
+  resetHistoryAndProgress,
 } from '../lib/db';
-import type { DatabaseInfo, CleanTestDataResult } from '../types';
+import type { BackupFileInfo, DatabaseInfo, ResetHistoryResult } from '../types';
+
+const RESET_CONFIRM_TEXT = '重置历史';
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isNumber(v: number | string): v is number {
+  return typeof v === 'number';
 }
 
 export default function DataManagement() {
@@ -23,16 +30,19 @@ export default function DataManagement() {
   const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Clean data confirmation state
-  const [cleanStep, setCleanStep] = useState(0); // 0=idle, 1=first confirm, 2=final confirm
-  const [cleanResult, setCleanResult] = useState<CleanTestDataResult | null>(null);
+  // Restore flow
+  const [backupInfo, setBackupInfo] = useState<BackupFileInfo | null>(null);
+  const [restoreError, setRestoreError] = useState('');
 
-  // Restore confirmation
-  const [restoreConfirmPath, setRestoreConfirmPath] = useState<string | null>(null);
+  // Reset flow
+  const [resetStep, setResetStep] = useState(0); // 0=idle, 1=confirm, 2=input text
+  const [resetInput, setResetInput] = useState('');
+  const [resetResult, setResetResult] = useState<ResetHistoryResult | null>(null);
 
   const clearMessages = () => {
     setError('');
     setSuccess('');
+    setRestoreError('');
   };
 
   const refreshInfo = async () => {
@@ -63,7 +73,7 @@ export default function DataManagement() {
 
       if (!filePath) {
         setBusy(false);
-        return; // user cancelled
+        return;
       }
 
       const result = await backupDatabase(filePath);
@@ -76,9 +86,11 @@ export default function DataManagement() {
     }
   };
 
+  // ---- Restore flow ----
+
   const handleRestoreSelect = async () => {
     clearMessages();
-    setRestoreConfirmPath(null);
+    setBackupInfo(null);
 
     const selected = await open({
       multiple: false,
@@ -88,23 +100,39 @@ export default function DataManagement() {
     if (!selected) return;
 
     const filePath = typeof selected === 'string' ? selected : selected.path;
-    setRestoreConfirmPath(filePath);
+
+    // Inspect the backup file before showing confirm UI
+    setBusy(true);
+    try {
+      const info = await inspectBackupFile(filePath);
+      setBackupInfo(info);
+    } catch (err) {
+      setRestoreError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRestoreCancel = () => {
+    setBackupInfo(null);
   };
 
   const handleRestoreConfirm = async () => {
-    if (!restoreConfirmPath) return;
+    if (!backupInfo) return;
     clearMessages();
     setBusy(true);
     try {
-      const result = await restoreDatabase(restoreConfirmPath);
+      const result = await restoreDatabase(backupInfo.path);
       setSuccess(result);
-      setRestoreConfirmPath(null);
+      setBackupInfo(null);
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
     }
   };
+
+  // ---- Export ----
 
   const handleExport = async () => {
     clearMessages();
@@ -138,32 +166,41 @@ export default function DataManagement() {
     }
   };
 
-  const handleCleanStart = () => {
+  // ---- Reset flow ----
+
+  const handleResetStart = () => {
     clearMessages();
-    setCleanStep(1);
+    setResetStep(1);
+    setResetInput('');
   };
 
-  const handleCleanCancel = () => {
-    setCleanStep(0);
-    setCleanResult(null);
+  const handleResetCancel = () => {
+    setResetStep(0);
+    setResetInput('');
+    setResetResult(null);
   };
 
-  const handleCleanConfirm = () => {
-    if (cleanStep === 1) {
-      setCleanStep(2);
-    } else if (cleanStep === 2) {
-      performClean();
+  const handleResetAdvance = () => {
+    if (resetStep === 1) {
+      setResetStep(2);
     }
   };
 
-  const performClean = async () => {
+  const handleResetExecute = () => {
+    if (resetInput.trim() === RESET_CONFIRM_TEXT) {
+      performReset();
+    }
+  };
+
+  const performReset = async () => {
     setBusy(true);
     try {
-      const result = await cleanTestData();
-      setCleanResult(result);
-      setCleanStep(0);
+      const result = await resetHistoryAndProgress();
+      setResetResult(result);
+      setResetStep(0);
+      setResetInput('');
       setSuccess(
-        `已清理 ${result.deleted_records} 条历史记录。保留: ${result.remaining.chains} 条主链, ${result.remaining.precedents} 条判例, ${result.remaining.rsip_formulas} 条定式。`,
+        `已重置 ${result.deleted_records} 条历史记录，所有链进度已归零。保留: ${result.remaining.chains} 条主链, ${result.remaining.precedents} 条判例, ${result.remaining.rsip_formulas} 条定式。`,
       );
       await refreshInfo();
     } catch (err) {
@@ -172,6 +209,25 @@ export default function DataManagement() {
       setBusy(false);
     }
   };
+
+  // ---- Helpers ----
+
+  const renderTableCount = (label: string, count: number | string) => {
+    if (isNumber(count)) {
+      return (
+        <span className="dm-table-count">
+          {label} <strong>{count}</strong>
+        </span>
+      );
+    }
+    return (
+      <span className="dm-table-count dm-table-missing">
+        {label} <strong>{count}</strong>
+      </span>
+    );
+  };
+
+  // ---- Loading ----
 
   if (loading) {
     return (
@@ -193,7 +249,7 @@ export default function DataManagement() {
         </p>
       )}
 
-      {/* Database Info */}
+      {/* ===== Database Info ===== */}
       <section className="dm-section">
         <h3>数据库信息</h3>
         {dbInfo && (
@@ -239,7 +295,7 @@ export default function DataManagement() {
         </button>
       </section>
 
-      {/* Backup */}
+      {/* ===== Backup ===== */}
       <section className="dm-section">
         <h3>备份数据</h3>
         <p className="dm-desc">
@@ -250,7 +306,7 @@ export default function DataManagement() {
         </button>
       </section>
 
-      {/* Restore */}
+      {/* ===== Restore ===== */}
       <section className="dm-section">
         <h3>从备份恢复</h3>
         <p className="dm-desc">
@@ -261,17 +317,41 @@ export default function DataManagement() {
           ⚠️ 恢复会替换当前所有本地数据。请确认已备份当前数据。
         </p>
 
-        {restoreConfirmPath ? (
+        {restoreError && (
+          <p className="form-error" style={{ marginBottom: 12 }}>{restoreError}</p>
+        )}
+
+        {/* Backup file info — after inspection */}
+        {backupInfo ? (
           <div className="dm-confirm-box">
-            <p className="dm-confirm-text">
-              确认要从以下文件恢复数据？
-            </p>
-            <p className="dm-confirm-path">{restoreConfirmPath}</p>
-            <p className="dm-confirm-warn">
-              此操作不可撤销！当前数据将被完全替换。恢复后需要重启应用。
+            <p className="dm-confirm-text">备份文件信息</p>
+            <div className="dm-backup-info-grid">
+              <div className="dm-backup-info-item">
+                <span>文件路径</span>
+                <span className="dm-backup-info-path">{backupInfo.path}</span>
+              </div>
+              <div className="dm-backup-info-item">
+                <span>文件大小</span>
+                <strong>{formatFileSize(backupInfo.file_size_bytes)}</strong>
+              </div>
+              <div className="dm-backup-info-item">
+                <span>数据库版本</span>
+                <strong>{backupInfo.version}</strong>
+              </div>
+            </div>
+            <div className="dm-table-counts" style={{ marginTop: 8 }}>
+              {renderTableCount('主链', backupInfo.tables.chains)}
+              {renderTableCount('专注记录', backupInfo.tables.focus_sessions)}
+              {renderTableCount('预约记录', backupInfo.tables.reservation_sessions)}
+              {renderTableCount('判例', backupInfo.tables.precedents)}
+              {renderTableCount('定式', backupInfo.tables.rsip_formulas)}
+              {renderTableCount('定式事件', backupInfo.tables.formula_events)}
+            </div>
+            <p className="dm-confirm-warn" style={{ marginTop: 14 }}>
+              此操作不可撤销！当前数据将被完全替换。恢复后请重启 Protocol 以加载新数据。
             </p>
             <div className="dm-confirm-actions">
-              <button className="btn btn-secondary" onClick={() => setRestoreConfirmPath(null)} disabled={busy}>
+              <button className="btn btn-secondary" onClick={handleRestoreCancel} disabled={busy}>
                 取消
               </button>
               <button className="btn btn-danger-outline" onClick={handleRestoreConfirm} disabled={busy}>
@@ -286,18 +366,19 @@ export default function DataManagement() {
         )}
       </section>
 
-      {/* Export */}
+      {/* ===== Export ===== */}
       <section className="dm-section">
         <h3>导出历史数据</h3>
         <p className="dm-desc">
-          将协议历史导出为 JSON 格式，包含：主链配置、专注记录、预约记录、判例、定式事件。可用于数据迁移或外部查看。
+          将协议历史导出为 JSON 格式，包含：主链配置、专注记录、预约记录、判例、定式事件、应用设置。
+          同时记录数据库版本和 Protocol 版本，可用于数据迁移或外部查看。
         </p>
         <button className="btn btn-primary" onClick={handleExport} disabled={busy}>
           {busy ? '导出中...' : '导出为 JSON'}
         </button>
       </section>
 
-      {/* Archive Note */}
+      {/* ===== Archive Note ===== */}
       <section className="dm-section">
         <h3>归档说明</h3>
         <div className="dm-note-box">
@@ -315,64 +396,81 @@ export default function DataManagement() {
         </div>
       </section>
 
-      {/* Clean Test Data */}
+      {/* ===== Reset History & Progress ===== */}
       <section className="dm-section dm-section-danger">
-        <h3>清理历史数据</h3>
+        <h3>重置历史与链进度</h3>
         <p className="dm-desc">
-          删除所有专注记录、预约记录和定式事件，重置所有链的计数。
+          删除所有专注记录、预约记录和定式事件，<strong>将所有链的当前长度与最佳长度归零</strong>。
           <strong>保留</strong>主链配置、判例库、定式树和应用设置不变。
         </p>
         <p className="dm-warn">
-          ⚠️ 此操作为<strong>不可逆</strong>的危险操作。清理前请先备份数据。
+          ⚠️ 此操作为<strong>不可逆</strong>的危险操作。执行前请先备份数据。
+          链进度一旦归零无法恢复。
         </p>
 
-        {cleanResult && (
+        {resetResult && (
           <div className="dm-clean-result">
-            已清理 <strong>{cleanResult.deleted_records}</strong> 条记录。
-            保留: {cleanResult.remaining.chains} 主链, {cleanResult.remaining.precedents} 判例, {cleanResult.remaining.rsip_formulas} 定式。
+            已重置 <strong>{resetResult.deleted_records}</strong> 条记录。
+            保留: {resetResult.remaining.chains} 主链, {resetResult.remaining.precedents} 判例, {resetResult.remaining.rsip_formulas} 定式。
           </div>
         )}
 
-        {cleanStep === 0 && (
-          <button className="btn btn-danger-outline" onClick={handleCleanStart} disabled={busy}>
-            {busy ? '清理中...' : '清理历史数据...'}
+        {resetStep === 0 && (
+          <button className="btn btn-danger-outline" onClick={handleResetStart} disabled={busy}>
+            {busy ? '处理中...' : '重置历史与链进度...'}
           </button>
         )}
 
-        {cleanStep === 1 && (
+        {resetStep === 1 && (
           <div className="dm-confirm-box">
             <p className="dm-confirm-text">
-              确认要清理所有历史数据？（第 1/2 步确认）
+              ⚠️ 确认要重置所有历史与链进度？
             </p>
             <p className="dm-confirm-detail">
-              将删除所有专注记录、预约记录、定式事件，并重置链计数。
-              主链、判例、定式树和应用设置将保留。
+              将删除所有专注记录、预约记录、定式事件，并将所有链的当前长度和最佳长度归零。
+              主链配置、判例库、定式树和应用设置将保留不变。
+              此操作不可撤销。
             </p>
             <div className="dm-confirm-actions">
-              <button className="btn btn-secondary" onClick={handleCleanCancel} disabled={busy}>
+              <button className="btn btn-secondary" onClick={handleResetCancel} disabled={busy}>
                 取消
               </button>
-              <button className="btn btn-danger-outline" onClick={handleCleanConfirm} disabled={busy}>
-                继续确认
+              <button className="btn btn-danger-outline" onClick={handleResetAdvance} disabled={busy}>
+                继续
               </button>
             </div>
           </div>
         )}
 
-        {cleanStep === 2 && (
+        {resetStep === 2 && (
           <div className="dm-confirm-box">
             <p className="dm-confirm-text dm-confirm-final">
-              ⚠️ 最终确认：此操作不可撤销！
+              ⚠️ 最终确认：输入"{RESET_CONFIRM_TEXT}"后点击执行
             </p>
             <p className="dm-confirm-detail">
-              请确认已备份当前数据。点击"执行清理"后将立即删除所有历史记录。
+              请在下方输入框中输入 <strong>"{RESET_CONFIRM_TEXT}"</strong> 以确认此操作。
+              此操作将立即执行，不可撤销。
             </p>
-            <div className="dm-confirm-actions">
-              <button className="btn btn-secondary" onClick={handleCleanCancel} disabled={busy}>
+            <div className="dm-reset-input-row">
+              <input
+                type="text"
+                className="settings-input dm-reset-input"
+                value={resetInput}
+                onChange={(e) => setResetInput(e.target.value)}
+                placeholder={`输入"${RESET_CONFIRM_TEXT}"`}
+                disabled={busy}
+              />
+            </div>
+            <div className="dm-confirm-actions" style={{ marginTop: 12 }}>
+              <button className="btn btn-secondary" onClick={handleResetCancel} disabled={busy}>
                 取消
               </button>
-              <button className="btn btn-danger-outline" onClick={handleCleanConfirm} disabled={busy}>
-                {busy ? '清理中...' : '执行清理'}
+              <button
+                className="btn btn-danger-outline"
+                onClick={handleResetExecute}
+                disabled={busy || resetInput.trim() !== RESET_CONFIRM_TEXT}
+              >
+                {busy ? '执行中...' : '执行重置'}
               </button>
             </div>
           </div>

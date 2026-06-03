@@ -3,9 +3,9 @@ import type {
   ActiveFocusSession,
   ActiveReservationSession,
   AppSetting,
+  BackupFileInfo,
   Chain,
   ChainPrecedent,
-  CleanTestDataResult,
   CompleteFocusResult,
   DashboardSummary,
   DatabaseInfo,
@@ -22,6 +22,7 @@ import type {
   ProtocolEvent,
   ProtocolPrecedent,
   ProtocolTimelineEvent,
+  ResetHistoryResult,
   RsipFormula,
   RsipSummary,
 } from '../../types';
@@ -302,6 +303,10 @@ export async function restoreDatabase(backupPath: string): Promise<string> {
   return invoke('restore_database', { backupPath });
 }
 
+export async function inspectBackupFile(backupPath: string): Promise<BackupFileInfo> {
+  return invoke('inspect_backup_file', { backupPath });
+}
+
 export async function getDatabaseInfo(): Promise<DatabaseInfo> {
   return invoke('get_database_info');
 }
@@ -310,8 +315,8 @@ export async function exportHistoryJson(): Promise<HistoryExport> {
   return invoke('export_history_json');
 }
 
-export async function cleanTestData(): Promise<CleanTestDataResult> {
-  return invoke('clean_test_data');
+export async function resetHistoryAndProgress(): Promise<ResetHistoryResult> {
+  return invoke('reset_history_and_progress');
 }
 
 export async function getDbVersion(): Promise<number> {

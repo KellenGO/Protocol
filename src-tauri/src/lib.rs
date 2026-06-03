@@ -2057,18 +2057,90 @@ fn get_protocol_timeline(
 
 // ===== Data Management Commands =====
 
+const REQUIRED_TABLES: &[&str] = &[
+    "chains",
+    "focus_sessions",
+    "reservation_sessions",
+    "precedents",
+    "app_settings",
+];
+
+const RSIP_TABLES: &[&str] = &["rsip_formulas", "formula_events"];
+
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [table],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|c| c > 0)
+    .unwrap_or(false)
+}
+
 fn validate_backup_file(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Err("备份文件不存在".into());
     }
-    let test_conn = Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
-    test_conn
-        .query_row("SELECT COUNT(*) FROM chains", [], |row| row.get::<_, i64>(0))
-        .map_err(|_| "备份文件缺少必要的表结构（chains 表不存在）".to_string())?;
-    test_conn
-        .query_row("SELECT COUNT(*) FROM app_settings", [], |row| row.get::<_, i64>(0))
-        .map_err(|_| "备份文件缺少必要的表结构（app_settings 表不存在）".to_string())?;
+    let test_conn =
+        Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
+
+    let mut missing: Vec<String> = Vec::new();
+    for table in REQUIRED_TABLES {
+        if !table_exists(&test_conn, table) {
+            missing.push((*table).to_string());
+        }
+    }
+    if !missing.is_empty() {
+        return Err(format!(
+            "备份文件缺少必要的表: {}\n该文件可能不是有效的 Protocol 数据库备份。",
+            missing.join(", ")
+        ));
+    }
+
     Ok(())
+}
+
+#[tauri::command]
+fn inspect_backup_file(backup_path: String) -> Result<serde_json::Value, String> {
+    let path = Path::new(&backup_path);
+    if !path.exists() {
+        return Err("备份文件不存在".into());
+    }
+
+    let conn =
+        Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
+
+    let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap_or(0);
+
+    let mut table_info = serde_json::Map::new();
+    for table in REQUIRED_TABLES.iter().chain(RSIP_TABLES.iter()) {
+        if table_exists(&conn, table) {
+            let count: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {}", table),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            table_info.insert(table.to_string(), serde_json::json!(count));
+        } else {
+            table_info.insert(
+                table.to_string(),
+                serde_json::Value::String("(表不存在)".into()),
+            );
+        }
+    }
+
+    Ok(serde_json::json!({
+        "path": backup_path,
+        "file_size_bytes": file_size_bytes,
+        "version": version,
+        "tables": table_info,
+    }))
 }
 
 #[tauri::command]
@@ -2117,7 +2189,7 @@ fn restore_database(
     fs::copy(backup, &state.db_path).map_err(|e| format!("恢复失败: {}", e))?;
 
     Ok(format!(
-        "数据已恢复。请重启应用以加载恢复的数据。\n恢复前安全备份: {}",
+        "恢复成功，请重启 Protocol 以加载新数据。\n恢复前安全备份: {}",
         safety_path.display()
     ))
 }
@@ -2214,21 +2286,32 @@ fn export_history_json(state: tauri::State<'_, Database>) -> Result<serde_json::
     let chains = export_table(
         "SELECT id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at FROM chains ORDER BY id",
     )?;
+    let app_settings = export_table(
+        "SELECT key, value FROM app_settings ORDER BY key",
+    )?;
+
+    let db_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap_or(0);
 
     Ok(serde_json::json!({
+        "export_version": 1,
+        "app_version": env!("CARGO_PKG_VERSION"),
         "exported_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "database_user_version": db_version,
         "tables": {
             "chains": chains,
             "focus_sessions": focus_sessions,
             "reservation_sessions": reservation_sessions,
             "precedents": precedents,
-            "formula_events": formula_events
+            "formula_events": formula_events,
+            "app_settings": app_settings
         }
     }))
 }
 
 #[tauri::command]
-fn clean_test_data(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+fn reset_history_and_progress(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
 
     let before = conn
@@ -2352,9 +2435,10 @@ pub fn run() {
             update_app_setting,
             backup_database,
             restore_database,
+            inspect_backup_file,
             get_database_info,
             export_history_json,
-            clean_test_data,
+            reset_history_and_progress,
             get_db_version,
             save_export_file,
         ])

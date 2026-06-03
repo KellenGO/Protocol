@@ -246,18 +246,37 @@ export interface DatabaseInfo {
   };
 }
 
+export interface BackupFileInfo {
+  path: string;
+  file_size_bytes: number;
+  version: number;
+  tables: {
+    chains: number | string;
+    focus_sessions: number | string;
+    reservation_sessions: number | string;
+    precedents: number | string;
+    app_settings: number | string;
+    rsip_formulas: number | string;
+    formula_events: number | string;
+  };
+}
+
 export interface HistoryExport {
+  export_version: number;
+  app_version: string;
   exported_at: string;
+  database_user_version: number;
   tables: {
     chains: Record<string, string>[];
     focus_sessions: Record<string, string>[];
     reservation_sessions: Record<string, string>[];
     precedents: Record<string, string>[];
     formula_events: Record<string, string>[];
+    app_settings: Record<string, string>[];
   };
 }
 
-export interface CleanTestDataResult {
+export interface ResetHistoryResult {
   deleted_records: number;
   remaining: {
     chains: number;
