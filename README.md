@@ -19,20 +19,23 @@ Protocol 不是一个普通的番茄钟、待办清单或习惯打卡应用。�
 
 ## 当前版本状态
 
-**版本号：** `v0.3.0`
+**master 分支版本号：** `v0.2.1`（可运行的最新稳定版）
 
-Protocol 已经进入 **V2 Gamma 之后的闭环成熟化阶段**，并正在向可稳定发布的质量基准线推进。
+**本分支（feature/release-quality）目标版本号：** `v0.3.0`
+
+`v0.3.0` 定义为 **V2 Gamma 后的第一个离线桌面稳定发布版**。该版本应在所有目标分支合并到 master 后，从 master 构建正式安装包。当前 `feature/release-quality` 分支是发布准备分支，负责统一版本号、整理文档、建立质量检查流程。
 
 | 里程碑 | 状态 |
 |--------|------|
-| CTDP V1（主链、预约、裁决、判例） | ✅ 已完成 |
-| V2 Alpha（RSIP 定式树） | ✅ 已完成 |
-| V2 Beta（轻量裁决、协议边界） | ✅ 已完成 |
-| V2 Gamma（辅助链连续性、第二预约信号、RSIP 单定式复盘） | ✅ 已完成 |
-| 辅助链裁决闭环 | ✅ 已完成 |
-| 判例库管理（查看/编辑/废止） | ✅ 已完成 |
-| RSIP 单定式维护 | ✅ 已完成 |
-| 发布质量保障 | 🔄 当前分支 |
+| CTDP V1（主链、预约、裁决、判例） | ✅ 已在 master |
+| V2 Alpha（RSIP 定式树） | ✅ 已在 master |
+| V2 Beta（轻量裁决、协议边界） | ✅ 已在 master |
+| V2 Gamma（辅助链连续性、第二预约信号、RSIP 单定式复盘） | ✅ 已在 master |
+| 辅助链裁决闭环 | ✅ 已在 master |
+| 判例库管理（查看/编辑/废止） | ✅ 已在 master |
+| RSIP 单定式维护 | ✅ 已在 master |
+| 发布质量保障（文档、脚本、QA 流程） | 🔄 当前分支（待合并） |
+| 数据管理（备份/恢复/导出/清理） | 🔄 feature/data-management（待合并） |
 
 ---
 
@@ -129,7 +132,10 @@ Protocol 目前**不包含**以下功能，且短期内无计划加入：
 - 数据库引擎：SQLite（WAL 模式，外键约束开启）
 - 不依赖任何云端服务
 - 不需要网络连接即可正常使用
-- 如需备份，直接复制 `protocol.db` 文件即可
+
+**备份方式：**
+- 若 `feature/data-management` 分支已合并，请使用应用内的数据管理页面进行备份
+- 若数据管理模块尚未合并，可直接复制 `protocol.db` 文件到安全位置作为手动备份
 
 ---
 
@@ -158,19 +164,22 @@ npm run dev
 npm run tauri dev
 ```
 
-### 构建
+### 构建与检查
 
 ```bash
-# TypeScript 类型检查 + 前端构建
+# TypeScript 类型检查 + 前端生产构建
 npm run build
 
-# 仅类型检查
+# 仅 TypeScript 类型检查（不构建）
 npm run typecheck
 
-# 完整检查（类型 + lint）
+# 轻量检查（类型 + ESLint）
 npm run check
 
-# Rust 侧检查
+# 完整检查（类型 + 构建 + Rust 编译检查）
+npm run check:full
+
+# Rust 侧单独检查
 cd src-tauri
 cargo check
 

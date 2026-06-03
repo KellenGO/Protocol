@@ -2,11 +2,13 @@
 
 本文档说明 Protocol 的版本发布检查、打包与回滚流程。
 
+> **重要原则：正式发布安装包必须在所有目标分支合并后的 master 分支上构建，不得在任意 feature 分支上构建。**
+
 ---
 
 ## 1. 发布前检查清单
 
-每次发布前，按顺序执行以下检查：
+每次发布前，在 **master 分支**（所有目标 feature 已合并后）按顺序执行以下检查：
 
 ### 1.1 版本号一致性
 
@@ -20,27 +22,32 @@
 | `README.md` | 版本号描述 |
 
 ```bash
-# 快速检查命令
-grep -n '"version"' package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+# 快速检查命令（Windows PowerShell）
+Select-String '"version"' package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json
 ```
 
 ### 1.2 代码质量检查
 
 ```bash
-# TypeScript 类型检查
-npm run typecheck
-
-# ESLint 检查
-npm run lint
-
-# 完整检查
+# 轻量检查（TypeScript 类型 + ESLint）
 npm run check
 
-# Rust 侧检查
+# 完整检查（类型 + 构建 + Rust 编译）
+npm run check:full
+
+# Rust 测试
 cd src-tauri
-cargo check
+cargo test
 cd ..
 ```
+
+`npm run check` 和 `npm run check:full` 的区别：
+
+| 命令 | 包含 | 耗时 | 适用场景 |
+|------|------|------|----------|
+| `npm run typecheck` | 仅 TypeScript 类型检查 | 快 | 开发中频繁使用 |
+| `npm run check` | typecheck + ESLint | 较快 | 提交前检查 |
+| `npm run check:full` | typecheck + build + cargo check | 较慢 | 合并前 / 发布前 |
 
 ### 1.3 前端构建
 
@@ -60,13 +67,15 @@ cd ..
 
 ### 1.5 手动冒烟测试
 
-参照 [`docs/QA_CHECKLIST.md`](QA_CHECKLIST.md) 逐项验证。
+参照 [`docs/QA_CHECKLIST.md`](QA_CHECKLIST.md)：
+- **提交前**：完成 Must-run smoke test（约 10 分钟）
+- **发布前**：完成 Full QA checklist
 
 ### 1.6 CHANGELOG 更新
 
 确保 [`CHANGELOG.md`](../CHANGELOG.md) 已记录当前版本的：
 - 功能摘要
-- 已完成能力
+- 已完成能力（标注归属：M 已在 master / R 本分支新增）
 - 已知限制
 - 后续方向
 
@@ -74,27 +83,43 @@ cd ..
 
 ## 2. 打包
 
-### 2.1 构建 Windows 安装包
+### 2.1 构建位置要求
+
+**正式安装包必须在 master 分支构建。** 构建前确认：
 
 ```bash
+# 1. 确认在 master 分支
+git checkout master
+
+# 2. 确认所有目标 feature 分支已合并
+git log --oneline -5
+
+# 3. 确认工作区干净
+git status
+```
+
+### 2.2 构建 Windows 安装包
+
+```bash
+npm install
 npm run tauri build
 ```
 
-### 2.2 安装包路径
+### 2.3 安装包路径
 
 构建产物位于 `src-tauri/target/release/bundle/`：
 
 ```
 src-tauri/target/release/bundle/
 ├── msi/
-│   └── Protocol_<version>_x64_zh-CN.msi    # Windows MSI 安装包
+│   └── Protocol_<version>_x64_en-US.msi       # Windows MSI 安装包
 └── nsis/
-    └── Protocol_<version>_x64-setup.exe      # NSIS 安装包（如已配置）
+    └── Protocol_<version>_x64-setup.exe        # NSIS 安装包（如已配置）
 ```
 
 `src-tauri/target/release/` 下还会生成独立的 `.exe` 可执行文件。
 
-### 2.3 构建 macOS / Linux 包
+### 2.4 构建 macOS / Linux 包
 
 当前主要目标是 Windows。如需构建其他平台：
 
@@ -110,29 +135,34 @@ npm run tauri build -- --target x86_64-unknown-linux-gnu
 
 ## 3. 数据库兼容性
 
-### 3.1 是否需要备份数据库
+### 3.1 发布前备份数据库
 
-**如果 schema 未变化**：不需要备份。现有 `protocol.db` 可直接使用新版本。
+**备份是必须步骤，无论 schema 是否变化。**
 
-**如果 schema 有变化**：
-1. 发布前备份 `protocol.db`（复制到安全位置）
-2. 项目的数据库迁移代码位于 `src-tauri/src/db.rs`
-3. 迁移机制：每个新列通过 `add_column_if_missing()` 函数添加，带默认值
-4. 已有 `migrate_precedents_to_core_schema()` 处理表结构变更
-5. 在发布前应在本地用旧数据库测试新版本启动
+备份方式（按优先级）：
+
+1. **若 `feature/data-management` 分支已合并到 master**：使用应用内的「数据管理」页面进行备份操作
+2. **若数据管理模块尚未合并**：手动复制数据库文件到安全位置
+
+```bash
+# 手动备份（Windows PowerShell）
+Copy-Item "$env:APPDATA\com.kellengo.protocol\protocol.db" "$env:USERPROFILE\Desktop\protocol.db.backup"
+```
 
 ### 3.2 确认 schema 兼容性
 
+1. 发布前备份 `protocol.db`
+2. 项目的数据库迁移代码位于 `src-tauri/src/db.rs`
+3. 迁移机制：每个新列通过 `add_column_if_missing()` 函数添加，带默认值
+4. 已有 `migrate_precedents_to_core_schema()` 处理表结构变更
+5. 在发布前应**用旧版本数据库文件启动新版本应用**，确认正常
+
 ```bash
 # 1. 备份当前数据库
-# Windows: 复制 %APPDATA%\com.kellengo.protocol\protocol.db
-
 # 2. 启动新版本应用
 npm run tauri dev
-
 # 3. 确认应用正常启动，Dashboard 数据完整
-
-# 4. 如启动失败，检查 schema 迁移代码
+# 4. 如启动失败，检查 db.rs 中的迁移代码
 ```
 
 ### 3.3 数据库文件位置
@@ -153,11 +183,11 @@ npm run tauri dev
 # 查看提交历史
 git log --oneline -10
 
-# 回滚到上一个版本（假设上一版本 tag 或 commit 为 <ref>）
-git checkout <ref>
+# 在 master 上回滚（保留历史）
+git revert <有问题版本的commit范围>
 
-# 或使用 git revert（保留历史）
-git revert <当前版本commit>..HEAD
+# 或直接 checkout 到上一版本 tag
+git checkout v0.2.1
 ```
 
 ### 4.2 数据库回滚兼容性
@@ -166,22 +196,20 @@ git revert <当前版本commit>..HEAD
 
 - 用旧版本应用打开新版数据库**通常可以正常工作**（新列有默认值）
 - 但需注意：如果新版本新增了表，旧版本不会使用这些表，数据不会丢失
-- 最安全的做法：在升级前用文件复制方式备份 `protocol.db`
+- **最安全的做法**：在升级前备份 `protocol.db`
 
 ### 4.3 紧急回滚步骤
 
 ```bash
 # 1. 备份当前数据库文件
-cp <app_data_dir>/protocol.db <app_data_dir>/protocol.db.backup
-
-# 2. 切换到上一个稳定版本
+# 2. 切换到上一个稳定版本 tag
 git checkout <上一个版本tag>
 
 # 3. 重新构建
 npm install
 npm run tauri build
 
-# 4. 安装旧版本，用备份数据库替换（如需要）
+# 4. 安装旧版本，如有需要则恢复备份的数据库
 ```
 
 ---
@@ -201,15 +229,23 @@ npm run tauri build
 ## 6. Git 工作流
 
 ```bash
-# 1. 确保在正确的功能分支上
+# 1. 在 feature 分支完成开发
 git checkout feature/release-quality
+# ... 开发、提交、推送 ...
 
-# 2. 提交所有修改
-git add -A
-git commit -m "release: v0.3.0 发布质量基准线"
+# 2. 创建 PR 合并到 master
+# （通过 GitHub PR 界面操作）
 
-# 3. 推送到远程
-git push origin feature/release-quality
+# 3. 切换到合并后的 master
+git checkout master
+git pull origin master
 
-# 4. 不直接合并到 master（等待 PR review）
+# 4. 在 master 上执行发布前检查
+npm run check:full
+cargo test  # in src-tauri
+
+# 5. 在 master 上构建正式安装包
+npm run tauri build
+
+# 6. 安装包在 src-tauri/target/release/bundle/ 下
 ```
