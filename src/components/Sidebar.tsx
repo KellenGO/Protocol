@@ -15,7 +15,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <span className="brand-name">Protocol</span>
-        <span className="brand-version">v0.1</span>
+        <span className="brand-version">v0.3</span>
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => (

@@ -19,23 +19,20 @@ Protocol 不是一个普通的番茄钟、待办清单或习惯打卡应用。�
 
 ## 当前版本状态
 
-**master 分支版本号：** `v0.2.1`（可运行的最新稳定版）
+**当前版本：v0.3.0**（已发布在 master 分支）
 
-**本分支（feature/release-quality）目标版本号：** `v0.3.0`
+所有功能模块已合并到 master，构成完整的离线桌面版本：
 
-`v0.3.0` 定义为 **V2 Gamma 后的第一个离线桌面稳定发布版**。该版本应在所有目标分支合并到 master 后，从 master 构建正式安装包。当前 `feature/release-quality` 分支是发布准备分支，负责统一版本号、整理文档、建立质量检查流程。
-
-| 里程碑 | 状态 |
-|--------|------|
-| CTDP V1（主链、预约、裁决、判例） | ✅ 已在 master |
-| V2 Alpha（RSIP 定式树） | ✅ 已在 master |
-| V2 Beta（轻量裁决、协议边界） | ✅ 已在 master |
-| V2 Gamma（辅助链连续性、第二预约信号、RSIP 单定式复盘） | ✅ 已在 master |
-| 辅助链裁决闭环 | ✅ 已在 master |
-| 判例库管理（查看/编辑/废止） | ✅ 已在 master |
-| RSIP 单定式维护 | ✅ 已在 master |
-| 发布质量保障（文档、脚本、QA 流程） | 🔄 当前分支（待合并） |
-| 数据管理（备份/恢复/导出/清理） | 🔄 feature/data-management（待合并） |
+| 模块 | 状态 |
+|------|------|
+| CTDP 主链与辅助链（专注任务、预约启动、失败裁决、判例化） | ✅ |
+| 判例库管理（查看详情、编辑、废止） | ✅ |
+| RSIP 定式树（节点、点亮/熄灭、递归回滚、单定式复盘） | ✅ |
+| 桌面集成（系统托盘、桌面通知、全局聚焦按钮） | ✅ |
+| 复盘系统（主链统计、失败模式、判例列表） | ✅ |
+| 数据管理（备份/恢复/导出/重置） | ✅ |
+| Dashboard 与 History（统一协议时间线） | ✅ |
+| 发布质量（CHANGELOG、QA 清单、发布流程） | ✅ |
 
 ---
 
@@ -50,6 +47,8 @@ Protocol 不是一个普通的番茄钟、待办清单或习惯打卡应用。�
 | 后端 | Rust |
 | 数据库 | SQLite（通过 rusqlite，bundled 模式） |
 | 样式 | 纯 CSS（无第三方 UI 框架） |
+| 桌面通知 | tauri-plugin-notification |
+| 文件对话框 | tauri-plugin-dialog |
 
 ---
 
@@ -89,6 +88,29 @@ Protocol 不是一个普通的番茄钟、待办清单或习惯打卡应用。�
 - 熄灭时可填写自定义备注
 - 可编辑定式标题和执行说明
 
+### 复盘系统
+
+- **主链复盘**：按主链汇总执行指标（完成/失败/判例/预约履约统计）
+- **失败模式复盘**：按调试类别聚合失败记录，帮助识别协议设计问题
+- **判例复盘**：浏览全部判例，追溯来源链与关联会话
+- 支持按时间周期筛选（7天 / 30天 / 90天 / 全部）
+
+### 数据管理
+
+- 查看数据库信息（路径、大小、版本、各表记录数）
+- 数据库备份（导出为 SQLite 文件）
+- 数据库恢复（从备份文件恢复）
+- 备份文件内容检查（恢复前预览）
+- 历史数据 JSON 导出
+- 历史记录与进度重置（保留链定义和判例库）
+
+### 桌面集成
+
+- 系统托盘图标与菜单
+- 桌面通知（专注任务结束、预约到期等关键节点）
+- 通知权限管理
+- 全局聚焦按钮（悬浮快捷入口）
+
 ### Dashboard 与 History
 
 - Dashboard 展示 CTDP 摘要与 RSIP 摘要
@@ -101,7 +123,7 @@ Protocol 不是一个普通的番茄钟、待办清单或习惯打卡应用。�
 - 默认专注时长
 - 默认预约时长
 - 辅助链确认窗口时长
-- 通知开关
+- 通知开关与权限管理
 
 ---
 
@@ -115,9 +137,9 @@ Protocol 目前**不包含**以下功能，且短期内无计划加入：
 - ❌ 手机 App（仅桌面）
 - ❌ 社区分享 / 社交功能
 - ❌ 积分 / 徽章 / 排行榜等游戏化元素
-- ❌ 桌面通知 / 窗口置顶（后续版本可能加入）
 - ❌ 复杂任务编组 / 精锐链 / 储君继承制
-- ❌ 国策组容错（后续版本）
+- ❌ 国策组容错（后续版本可能加入）
+- ❌ 多语言支持（仅中文界面）
 - ❌ 自动化 CI/CD 流水线
 
 这些功能并非不重要，而是为了让 Protocol 在当前阶段保持产品边界清晰。
@@ -134,8 +156,13 @@ Protocol 目前**不包含**以下功能，且短期内无计划加入：
 - 不需要网络连接即可正常使用
 
 **备份方式：**
-- 若 `feature/data-management` 分支已合并，请使用应用内的数据管理页面进行备份
-- 若数据管理模块尚未合并，可直接复制 `protocol.db` 文件到安全位置作为手动备份
+
+使用应用内的「数据管理」页面进行备份、恢复和导出操作。
+
+应用数据目录位置：
+- Windows: `%APPDATA%/com.kellengo.protocol/`
+- macOS: `~/Library/Application Support/com.kellengo.protocol/`
+- Linux: `~/.local/share/com.kellengo.protocol/`
 
 ---
 
@@ -203,7 +230,6 @@ npm run tauri build
 ```text
 src/
   components/        共享 React 组件
-  features/          功能模块
   lib/db/            前端数据库命令封装
   pages/             应用页面
   styles/            全局 CSS
@@ -217,11 +243,11 @@ src-tauri/
   tauri.conf.json    桌面应用配置
 docs/
   PRODUCT_SPEC.md    产品规格说明
-  V2_ALPHA_PROTOCOL_MAP.md  V2 功能映射
-  PROTOCOL_V2_CURRENT.md    当前状态文档
   QA_CHECKLIST.md    质量检查清单
   RELEASE_PROCESS.md  发布流程
-  CHANGELOG.md       发布说明
+  DESKTOP_INTEGRATION.md  桌面集成说明
+  PROTOCOL_V2_CURRENT.md    当前状态文档
+  NEXT_STEPS.md      后续方向
   archive/           历史规划文档
 ```
 
@@ -252,10 +278,7 @@ docs/
 ### 数据库问题
 
 - 数据库文件损坏：删除应用数据目录下的 `protocol.db`，重启应用会自动创建新数据库
-- 应用数据目录位置：
-  - Windows: `%APPDATA%/com.kellengo.protocol/`
-  - macOS: `~/Library/Application Support/com.kellengo.protocol/`
-  - Linux: `~/.local/share/com.kellengo.protocol/`
+- 建议定期使用「数据管理」页面进行数据库备份
 
 ### 应用无法启动
 
@@ -277,10 +300,7 @@ docs/
 ## 相关文档
 
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — 产品规格说明
-- [`docs/V2_ALPHA_PROTOCOL_MAP.md`](docs/V2_ALPHA_PROTOCOL_MAP.md) — V2 功能与理论映射
+- [`docs/DESKTOP_INTEGRATION.md`](docs/DESKTOP_INTEGRATION.md) — 桌面集成说明
 - [`docs/PROTOCOL_V2_CURRENT.md`](docs/PROTOCOL_V2_CURRENT.md) — 当前状态
-- [`docs/PROTOCOL_V2_BETA_REPORT.md`](docs/PROTOCOL_V2_BETA_REPORT.md) — V2 Beta 报告
-- [`docs/PROTOCOL_V2_GAMMA_REPORT.md`](docs/PROTOCOL_V2_GAMMA_REPORT.md) — V2 Gamma 报告
-- [`docs/PROTOCOL_RSIP_V1_MATURITY_REPORT.md`](docs/PROTOCOL_RSIP_V1_MATURITY_REPORT.md) — RSIP 成熟度报告
 - [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) — 后续方向
 - [`docs/archive/`](docs/archive/) — 历史规划文档
