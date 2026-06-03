@@ -99,7 +99,7 @@ export default function DataManagement() {
 
     if (!selected) return;
 
-    const filePath = typeof selected === 'string' ? selected : selected.path;
+    const filePath = selected;
 
     // Inspect the backup file before showing confirm UI
     setBusy(true);
