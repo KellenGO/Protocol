@@ -6,6 +6,7 @@ import ChainList from './pages/ChainList';
 import ChainDetail from './pages/ChainDetail';
 import FocusSessionPage from './pages/FocusSession';
 import History from './pages/History';
+import Review from './pages/Review';
 import RSIP from './pages/RSIP';
 import Settings from './pages/Settings';
 
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/chains/:id" element={<ChainDetail />} />
             <Route path="/chains/:id/focus" element={<FocusSessionPage />} />
             <Route path="/history" element={<History />} />
+            <Route path="/review" element={<Review />} />
             <Route path="/rsip" element={<RSIP />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>

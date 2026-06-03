@@ -5,8 +5,10 @@ import type {
   AppSetting,
   Chain,
   ChainPrecedent,
+  ChainReviewStats,
   CompleteFocusResult,
   DashboardSummary,
+  FailureDebugSummary,
   FailResetResult,
   FailPrecedentResult,
   FailReservationPrecedentResult,
@@ -16,6 +18,7 @@ import type {
   GlobalActiveReservationSession,
   FormulaEvent,
   FormulaReview,
+  PrecedentReviewItem,
   ProtocolEvent,
   ProtocolPrecedent,
   ProtocolTimelineEvent,
@@ -287,4 +290,16 @@ export async function getRsipSummary(): Promise<RsipSummary> {
 
 export async function getRsipFormulaReview(id: number): Promise<FormulaReview> {
   return invoke('get_rsip_formula_review', { id });
+}
+
+export async function getChainReviewStats(since?: string | null): Promise<ChainReviewStats[]> {
+  return invoke('get_chain_review_stats', { since: since ?? null });
+}
+
+export async function getFailureDebugSummary(since?: string | null): Promise<FailureDebugSummary[]> {
+  return invoke('get_failure_debug_summary', { since: since ?? null });
+}
+
+export async function getPrecedentReviewList(since?: string | null): Promise<PrecedentReviewItem[]> {
+  return invoke('get_precedent_review_list', { since: since ?? null });
 }

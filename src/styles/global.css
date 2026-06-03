@@ -1875,3 +1875,297 @@ body {
 .main-content::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* ===== Review Page ===== */
+
+.review-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.review-tab {
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.review-tab:hover {
+  color: var(--text-primary);
+}
+
+.review-tab-active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+
+.review-period-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.review-period-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-period-options {
+  display: flex;
+  gap: 4px;
+}
+
+.review-period-btn {
+  padding: 4px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.review-period-btn:hover {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.review-period-active {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Chain Review Cards */
+
+.review-chain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-chain-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.review-chain-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.review-chain-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.review-metric-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-metric-group-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.review-metric-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.review-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  min-width: 80px;
+}
+
+.review-metric-positive {
+  background: rgba(68, 170, 136, 0.06);
+}
+
+.review-metric-negative {
+  background: rgba(204, 68, 68, 0.05);
+}
+
+.review-metric-neutral {
+  background: var(--accent-subtle);
+}
+
+.review-metric-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.review-metric-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Failure Review */
+
+.review-failure-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-failure-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+}
+
+.review-failure-summary strong {
+  font-size: 18px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.review-failure-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-failure-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-failure-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+
+.review-failure-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.review-failure-category {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.review-failure-count {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--danger);
+}
+
+.review-failure-notes {
+  border-top: 1px solid var(--border-light);
+  padding-top: 10px;
+}
+
+.review-failure-notes-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.review-failure-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  padding: 4px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-light);
+  margin-bottom: 4px;
+}
+
+/* Precedent Review */
+
+.review-precedent-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.review-precedent-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+}
+
+.review-precedent-summary strong {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.review-precedent-item {
+  cursor: default;
+}
+
+.review-precedent-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.review-precedent-info {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-precedent-chain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.review-precedent-session {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
