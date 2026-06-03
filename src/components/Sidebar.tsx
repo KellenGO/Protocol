@@ -3,8 +3,8 @@ import { NavLink } from 'react-router-dom';
 const navItems = [
   { to: '/', label: 'Dashboard', icon: 'D' },
   { to: '/chains', label: '主链', icon: 'C' },
-  { to: '/history', label: '历史记录', icon: 'H' },
-  { to: '/review', label: '复盘', icon: 'V' },
+  { to: '/history', label: '协议时间线', icon: 'H' },
+  { to: '/review', label: '协议复盘', icon: 'V' },
   { to: '/rsip', label: 'RSIP', icon: 'R' },
   { to: '/data-management', label: '数据管理', icon: 'M' },
   { to: '/settings', label: '设置', icon: 'S' },

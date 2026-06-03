@@ -37,7 +37,7 @@ const TABS: { key: ReviewTab; label: string }[] = [
 ];
 
 const REVIEW_HINT =
-  'History（历史记录）展示协议事件时间线，用于回顾每次具体事件。Review（复盘）聚焦失败模式、协议边界变化和链稳定性，用于发现规律与调整协议配置。';
+  'History 展示协议事件时间线，Review 聚焦失败模式、协议边界变化和链稳定性。';
 
 function scopeLabel(scope: string): string {
   return scope === 'main_chain' ? '主链' : '辅助链';
@@ -81,44 +81,50 @@ export default function Review() {
   }, [tab, period]);
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h2>协议复盘</h2>
+    <div className="page review-page">
+      <div className="review-hero">
+        <div className="page-title-block">
+          <h2>协议复盘</h2>
+          <p className="page-subtitle">{REVIEW_HINT}</p>
+        </div>
       </div>
 
-      <p className="page-subtitle" style={{ marginTop: 0, marginBottom: 20 }}>
-        {REVIEW_HINT}
-      </p>
+      <div className="review-controls control-card">
+        <div className="review-control-group">
+          <span className="review-control-label">复盘模式</span>
+          <div className="review-tabs">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                className={`review-tab ${tab === t.key ? 'review-tab-active' : ''}`}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <div className="review-tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`review-tab ${tab === t.key ? 'review-tab-active' : ''}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="review-period-bar">
-        <span className="review-period-label">时间范围</span>
-        <div className="review-period-options">
-          {(Object.keys(PERIOD_LABELS) as TimePeriod[]).map((p) => (
-            <button
-              key={p}
-              className={`review-period-btn ${period === p ? 'review-period-active' : ''}`}
-              onClick={() => setPeriod(p)}
-            >
-              {PERIOD_LABELS[p]}
-            </button>
-          ))}
+        <div className="review-control-group">
+          <span className="review-control-label">时间范围</span>
+          <div className="review-period-options">
+            {(Object.keys(PERIOD_LABELS) as TimePeriod[]).map((p) => (
+              <button
+                key={p}
+                className={`review-period-btn ${period === p ? 'review-period-active' : ''}`}
+                onClick={() => setPeriod(p)}
+              >
+                {PERIOD_LABELS[p]}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {loading ? (
-        <p className="placeholder-text">加载中...</p>
+        <div className="review-loading">
+          <p className="placeholder-text">加载中...</p>
+        </div>
       ) : (
         <>
           {tab === 'chains' && <ChainsReview stats={chainStats} navigate={navigate} />}
@@ -139,9 +145,11 @@ function ChainsReview({
 }) {
   if (stats.length === 0) {
     return (
-      <div className="empty-state">
-        <p className="empty-title">暂无数据</p>
-        <p className="empty-desc">完成主链任务、辅助链履约和裁决后，复盘数据会出现在这里。</p>
+      <div className="review-empty-card">
+        <div className="empty-state">
+          <p className="empty-title">暂无复盘数据</p>
+          <p className="empty-desc">完成主链任务、辅助链履约和裁决后，复盘数据会出现在这里。</p>
+        </div>
       </div>
     );
   }
@@ -151,12 +159,15 @@ function ChainsReview({
       {stats.map((c) => (
         <div key={c.chain_id} className="review-chain-card">
           <div className="review-chain-head">
-            <button
-              className="history-chain-link"
-              onClick={() => navigate(`/chains/${c.chain_id}`)}
-            >
-              {c.chain_name}
-            </button>
+            <div className="review-chain-title">
+              <span className="review-chain-kicker">主链</span>
+              <button
+                className="review-chain-name"
+                onClick={() => navigate(`/chains/${c.chain_id}`)}
+              >
+                {c.chain_name}
+              </button>
+            </div>
             <span className={`status-badge ${c.status === 'active' ? 'status-active' : 'status-archived'}`}>
               {c.status === 'active' ? '活跃' : '已归档'}
             </span>
@@ -167,7 +178,7 @@ function ChainsReview({
               <span className="review-metric-group-label">主链</span>
               <div className="review-metric-row">
                 <ReviewMetric label="正式任务完成" value={c.completed_count} tone="positive" />
-                <ReviewMetric label="失败清零" value={c.failed_reset_count} tone="negative" />
+                <ReviewMetric label="链条断裂" value={c.failed_reset_count} tone="negative" />
                 <ReviewMetric label="判例化" value={c.failed_precedent_count} tone="neutral" />
               </div>
             </div>
@@ -223,13 +234,15 @@ function FailuresReview({
 }) {
   if (summary.length === 0) {
     return (
-      <div className="empty-state">
-        <p className="empty-title">暂无失败记录</p>
-        <p className="empty-desc">
-          {period === 'all'
-            ? '完成主链失败裁决或辅助链违约裁决并填写调试分类后，失败模式数据会出现在这里。'
-            : '当前时间范围内没有失败记录。尝试扩大时间范围。'}
-        </p>
+      <div className="review-empty-card">
+        <div className="empty-state">
+          <p className="empty-title">暂无失败记录</p>
+          <p className="empty-desc">
+            {period === 'all'
+              ? '完成主链失败裁决或辅助链违约裁决并填写调试分类后，失败模式数据会出现在这里。'
+              : '当前时间范围内没有失败记录。尝试扩大时间范围。'}
+          </p>
+        </div>
       </div>
     );
   }
@@ -238,7 +251,7 @@ function FailuresReview({
 
   return (
     <div className="review-failure-layout">
-      <div className="review-failure-summary">
+      <div className="review-summary-card">
         <span className="review-failure-total">
           共 <strong>{totalFailures}</strong> 次失败裁决
         </span>
@@ -298,13 +311,15 @@ function PrecedentsReview({
 }) {
   if (list.length === 0) {
     return (
-      <div className="empty-state">
-        <p className="empty-title">暂无判例</p>
-        <p className="empty-desc">
-          {period === 'all'
-            ? '在失败裁决中判例化后，判例会出现在这里。判例是协议的正式边界。'
-            : '当前时间范围内没有判例。尝试扩大时间范围。'}
-        </p>
+      <div className="review-empty-card">
+        <div className="empty-state">
+          <p className="empty-title">暂无判例</p>
+          <p className="empty-desc">
+            {period === 'all'
+              ? '在失败裁决中判例化后，判例会出现在这里。判例是协议的正式边界。'
+              : '当前时间范围内没有判例。尝试扩大时间范围。'}
+          </p>
+        </div>
       </div>
     );
   }
@@ -314,7 +329,7 @@ function PrecedentsReview({
 
   return (
     <div className="review-precedent-layout">
-      <div className="review-precedent-summary">
+      <div className="review-summary-card">
         <span>
           共 <strong>{list.length}</strong> 条判例（生效 <strong>{activeCount}</strong>，废止 <strong>{retiredCount}</strong>）
         </span>

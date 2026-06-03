@@ -231,20 +231,32 @@ export default function DataManagement() {
 
   if (loading) {
     return (
-      <div className="page">
-        <h2>数据管理</h2>
-        <p className="placeholder-text">加载中...</p>
+      <div className="page dm-page">
+        <div className="page-header">
+          <div className="page-title-block">
+            <h2>数据管理</h2>
+            <p className="page-subtitle">管理本地数据库、备份、恢复和历史导出。</p>
+          </div>
+        </div>
+        <div className="review-loading">
+          <p className="placeholder-text">加载中...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="page">
-      <h2>数据管理</h2>
+    <div className="page dm-page">
+      <div className="page-header">
+        <div className="page-title-block">
+          <h2>数据管理</h2>
+          <p className="page-subtitle">Protocol 的本地数据只在离线数据库中流转；这里负责备份、恢复和导出。</p>
+        </div>
+      </div>
 
-      {error && <p className="form-error" style={{ marginBottom: 16 }}>{error}</p>}
+      {error && <p className="form-error">{error}</p>}
       {success && (
-        <p className="dm-success" style={{ marginBottom: 16 }}>
+        <p className="dm-success">
           {success}
         </p>
       )}
@@ -253,46 +265,39 @@ export default function DataManagement() {
       <section className="dm-section">
         <h3>数据库信息</h3>
         {dbInfo && (
-          <div className="dm-info-grid">
-            <div className="dm-info-item">
-              <span className="dm-info-label">路径</span>
-              <span className="dm-info-value dm-info-path">{dbInfo.db_path}</span>
+          <div className="dm-info-layout">
+            <div className="dm-path-panel">
+              <span className="dm-info-label">数据库路径</span>
+              <code className="code-path">{dbInfo.db_path}</code>
             </div>
-            <div className="dm-info-item">
-              <span className="dm-info-label">文件大小</span>
-              <span className="dm-info-value">{formatFileSize(dbInfo.file_size_bytes)}</span>
+
+            <div className="dm-info-grid">
+              <div className="dm-stat">
+                <span className="dm-stat-label">文件大小</span>
+                <strong className="dm-stat-value">{formatFileSize(dbInfo.file_size_bytes)}</strong>
+              </div>
+              <div className="dm-stat">
+                <span className="dm-stat-label">数据库版本</span>
+                <strong className="dm-stat-value">{dbInfo.version}</strong>
+              </div>
             </div>
-            <div className="dm-info-item">
-              <span className="dm-info-label">数据库版本</span>
-              <span className="dm-info-value">{dbInfo.version}</span>
+
+            <div className="dm-table-counts">
+              {renderTableCount('主链', dbInfo.tables.chains)}
+              {renderTableCount('专注记录', dbInfo.tables.focus_sessions)}
+              {renderTableCount('预约记录', dbInfo.tables.reservation_sessions)}
+              {renderTableCount('判例', dbInfo.tables.precedents)}
+              {renderTableCount('定式', dbInfo.tables.rsip_formulas)}
+              {renderTableCount('定式事件', dbInfo.tables.formula_events)}
+            </div>
+
+            <div className="dm-section-actions">
+              <button className="btn btn-secondary" onClick={refreshInfo} disabled={busy}>
+                刷新信息
+              </button>
             </div>
           </div>
         )}
-        {dbInfo && (
-          <div className="dm-table-counts">
-            <span className="dm-table-count">
-              主链 <strong>{dbInfo.tables.chains}</strong>
-            </span>
-            <span className="dm-table-count">
-              专注记录 <strong>{dbInfo.tables.focus_sessions}</strong>
-            </span>
-            <span className="dm-table-count">
-              预约记录 <strong>{dbInfo.tables.reservation_sessions}</strong>
-            </span>
-            <span className="dm-table-count">
-              判例 <strong>{dbInfo.tables.precedents}</strong>
-            </span>
-            <span className="dm-table-count">
-              定式 <strong>{dbInfo.tables.rsip_formulas}</strong>
-            </span>
-            <span className="dm-table-count">
-              定式事件 <strong>{dbInfo.tables.formula_events}</strong>
-            </span>
-          </div>
-        )}
-        <button className="btn btn-secondary" onClick={refreshInfo} disabled={busy} style={{ marginTop: 12 }}>
-          刷新信息
-        </button>
       </section>
 
       {/* ===== Backup ===== */}
@@ -301,9 +306,11 @@ export default function DataManagement() {
         <p className="dm-desc">
           将当前 SQLite 数据库完整复制为一个备份文件。建议定期备份，保留到安全位置。
         </p>
-        <button className="btn btn-primary" onClick={handleBackup} disabled={busy}>
-          {busy ? '处理中...' : '备份当前数据'}
-        </button>
+        <div className="dm-section-actions">
+          <button className="btn btn-primary" onClick={handleBackup} disabled={busy}>
+            {busy ? '处理中...' : '备份当前数据'}
+          </button>
+        </div>
       </section>
 
       {/* ===== Restore ===== */}
@@ -314,11 +321,11 @@ export default function DataManagement() {
           恢复前会自动创建当前数据的安全备份，存放在数据库目录的 <code>.backup/</code> 子目录下。
         </p>
         <p className="dm-warn">
-          ⚠️ 恢复会替换当前所有本地数据。请确认已备份当前数据。
+          恢复会替换当前所有本地数据。请确认已备份当前数据库。
         </p>
 
         {restoreError && (
-          <p className="form-error" style={{ marginBottom: 12 }}>{restoreError}</p>
+          <p className="form-error">{restoreError}</p>
         )}
 
         {/* Backup file info — after inspection */}
@@ -328,7 +335,7 @@ export default function DataManagement() {
             <div className="dm-backup-info-grid">
               <div className="dm-backup-info-item">
                 <span>文件路径</span>
-                <span className="dm-backup-info-path">{backupInfo.path}</span>
+                <code className="code-path">{backupInfo.path}</code>
               </div>
               <div className="dm-backup-info-item">
                 <span>文件大小</span>
@@ -339,7 +346,7 @@ export default function DataManagement() {
                 <strong>{backupInfo.version}</strong>
               </div>
             </div>
-            <div className="dm-table-counts" style={{ marginTop: 8 }}>
+            <div className="dm-table-counts">
               {renderTableCount('主链', backupInfo.tables.chains)}
               {renderTableCount('专注记录', backupInfo.tables.focus_sessions)}
               {renderTableCount('预约记录', backupInfo.tables.reservation_sessions)}
@@ -347,22 +354,24 @@ export default function DataManagement() {
               {renderTableCount('定式', backupInfo.tables.rsip_formulas)}
               {renderTableCount('定式事件', backupInfo.tables.formula_events)}
             </div>
-            <p className="dm-confirm-warn" style={{ marginTop: 14 }}>
+            <p className="dm-confirm-warn">
               此操作不可撤销！当前数据将被完全替换。恢复后请重启 Protocol 以加载新数据。
             </p>
             <div className="dm-confirm-actions">
               <button className="btn btn-secondary" onClick={handleRestoreCancel} disabled={busy}>
                 取消
               </button>
-              <button className="btn btn-danger-outline" onClick={handleRestoreConfirm} disabled={busy}>
+              <button className="btn btn-danger" onClick={handleRestoreConfirm} disabled={busy}>
                 {busy ? '恢复中...' : '确认恢复'}
               </button>
             </div>
           </div>
         ) : (
-          <button className="btn btn-secondary" onClick={handleRestoreSelect} disabled={busy}>
-            选择备份文件...
-          </button>
+          <div className="dm-section-actions">
+            <button className="btn btn-secondary" onClick={handleRestoreSelect} disabled={busy}>
+              选择备份文件...
+            </button>
+          </div>
         )}
       </section>
 
@@ -373,9 +382,11 @@ export default function DataManagement() {
           将协议历史导出为 JSON 格式，包含：主链配置、专注记录、预约记录、判例、定式事件、应用设置。
           同时记录数据库版本和 Protocol 版本，可用于数据迁移或外部查看。
         </p>
-        <button className="btn btn-primary" onClick={handleExport} disabled={busy}>
-          {busy ? '导出中...' : '导出为 JSON'}
-        </button>
+        <div className="dm-section-actions">
+          <button className="btn btn-secondary" onClick={handleExport} disabled={busy}>
+            {busy ? '导出中...' : '导出为 JSON'}
+          </button>
+        </div>
       </section>
 
       {/* ===== Archive Note ===== */}
@@ -390,7 +401,7 @@ export default function DataManagement() {
             <li>判例支持 <code>active</code> / <code>retired</code> 状态切换（已废止判例不会在协议边界中展示）</li>
             <li>RSIP 定式支持点亮 (<code>active</code>) 与熄灭 (<code>inactive</code>) 状态切换</li>
           </ul>
-          <p style={{ marginTop: 8 }}>
+          <p className="dm-note-foot">
             建议优先将不再使用的链归档、将不适用的判例废止，而非直接删除。这样可以保留完整的历史关联。
           </p>
         </div>
@@ -404,7 +415,7 @@ export default function DataManagement() {
           <strong>保留</strong>主链配置、判例库、定式树和应用设置不变。
         </p>
         <p className="dm-warn">
-          ⚠️ 此操作为<strong>不可逆</strong>的危险操作。执行前请先备份数据。
+          此操作为<strong>不可逆</strong>的危险操作。执行前请先备份数据。
           链进度一旦归零无法恢复。
         </p>
 
@@ -416,15 +427,17 @@ export default function DataManagement() {
         )}
 
         {resetStep === 0 && (
-          <button className="btn btn-danger-outline" onClick={handleResetStart} disabled={busy}>
-            {busy ? '处理中...' : '重置历史与链进度...'}
-          </button>
+          <div className="dm-section-actions">
+            <button className="btn btn-danger" onClick={handleResetStart} disabled={busy}>
+              {busy ? '处理中...' : '重置历史与链进度...'}
+            </button>
+          </div>
         )}
 
         {resetStep === 1 && (
           <div className="dm-confirm-box">
             <p className="dm-confirm-text">
-              ⚠️ 确认要重置所有历史与链进度？
+              确认要重置所有历史与链进度？
             </p>
             <p className="dm-confirm-detail">
               将删除所有专注记录、预约记录、定式事件，并将所有链的当前长度和最佳长度归零。
@@ -435,7 +448,7 @@ export default function DataManagement() {
               <button className="btn btn-secondary" onClick={handleResetCancel} disabled={busy}>
                 取消
               </button>
-              <button className="btn btn-danger-outline" onClick={handleResetAdvance} disabled={busy}>
+              <button className="btn btn-danger" onClick={handleResetAdvance} disabled={busy}>
                 继续
               </button>
             </div>
@@ -445,7 +458,7 @@ export default function DataManagement() {
         {resetStep === 2 && (
           <div className="dm-confirm-box">
             <p className="dm-confirm-text dm-confirm-final">
-              ⚠️ 最终确认：输入"{RESET_CONFIRM_TEXT}"后点击执行
+              最终确认：输入"{RESET_CONFIRM_TEXT}"后点击执行
             </p>
             <p className="dm-confirm-detail">
               请在下方输入框中输入 <strong>"{RESET_CONFIRM_TEXT}"</strong> 以确认此操作。
@@ -461,12 +474,12 @@ export default function DataManagement() {
                 disabled={busy}
               />
             </div>
-            <div className="dm-confirm-actions" style={{ marginTop: 12 }}>
+            <div className="dm-confirm-actions">
               <button className="btn btn-secondary" onClick={handleResetCancel} disabled={busy}>
                 取消
               </button>
               <button
-                className="btn btn-danger-outline"
+                className="btn btn-danger"
                 onClick={handleResetExecute}
                 disabled={busy || resetInput.trim() !== RESET_CONFIRM_TEXT}
               >
