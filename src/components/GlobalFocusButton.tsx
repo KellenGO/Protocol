@@ -9,6 +9,14 @@ type GlobalActiveState =
   | { kind: 'reservation'; data: GlobalActiveReservationSession }
   | null;
 
+/*
+ * 防重复通知策略：
+ * - `notifiedRef` 记录 "focus-{id}" 或 "reservation-{id}" 键
+ * - 同一 session，只要 ref 已匹配就不再发送系统通知
+ * - 同一 session 的 toast 也由 `toastedSessionRef` 独立防重复
+ * - due/pending 状态消失时（用户完成/裁决），清空 ref
+ * - 应用重启后 ref 自然清空，因此重启后若仍处于 due/pending 状态，会再通知一次
+ */
 async function shouldSendNotification(): Promise<boolean> {
   try {
     const settings = await getAppSettings();

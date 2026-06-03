@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getAppSettings, updateAppSetting } from '../lib/db';
 import type { AppSetting } from '../types';
-import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
 function getValue(settings: AppSetting[], key: string): string {
   return settings.find((s) => s.key === key)?.value ?? '';
@@ -15,6 +15,7 @@ export default function Settings() {
   const [notifyEnabled, setNotifyEnabled] = useState(false);
   const [notifyPermissionDenied, setNotifyPermissionDenied] = useState(false);
   const [notifySaving, setNotifySaving] = useState(false);
+  const [testNotifyResult, setTestNotifyResult] = useState<string | null>(null);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
 
@@ -50,10 +51,10 @@ export default function Settings() {
   async function handleNotifyToggle() {
     setError('');
     setNotifyPermissionDenied(false);
+    setTestNotifyResult(null);
     const newValue = !notifyEnabled;
 
     if (newValue) {
-      // Turning ON: check / request permission first
       try {
         const granted = await isPermissionGranted();
         if (!granted) {
@@ -64,7 +65,7 @@ export default function Settings() {
           }
         }
       } catch {
-        setError('无法检查通知权限。请确认系统设置中允许 Protocol 发送通知。');
+        setError('系统通知权限未授予，请在系统设置中允许 Protocol 通知。');
         return;
       }
     }
@@ -77,6 +78,23 @@ export default function Settings() {
       setError(String(err));
     } finally {
       setNotifySaving(false);
+    }
+  }
+
+  async function handleTestNotification() {
+    setTestNotifyResult(null);
+    setError('');
+
+    try {
+      const granted = await isPermissionGranted();
+      if (!granted) {
+        setTestNotifyResult('denied');
+        return;
+      }
+      sendNotification({ title: 'Protocol', body: 'Protocol 通知已启用' });
+      setTestNotifyResult('sent');
+    } catch {
+      setTestNotifyResult('error');
     }
   }
 
@@ -176,13 +194,38 @@ export default function Settings() {
             <span className="settings-item-label">桌面通知</span>
             <span className="settings-item-hint">
               {notifyPermissionDenied
-                ? '权限未授予，请在系统设置中允许 Protocol 发送通知'
+                ? '系统通知权限未授予，请在系统设置中允许 Protocol 通知。'
                 : notifyEnabled
                   ? '专注和辅助链到期时会发送桌面通知'
                   : '开启后在协议到期时接收桌面通知'}
             </span>
+            {testNotifyResult === 'sent' && (
+              <span className="settings-item-hint" style={{ color: 'var(--success)' }}>
+                测试通知已发送，请检查系统通知中心。
+              </span>
+            )}
+            {testNotifyResult === 'denied' && (
+              <span className="settings-item-hint" style={{ color: 'var(--danger)' }}>
+                系统通知权限未授予，请在系统设置中允许 Protocol 通知。
+              </span>
+            )}
+            {testNotifyResult === 'error' && (
+              <span className="settings-item-hint" style={{ color: 'var(--danger)' }}>
+                发送测试通知失败，请检查系统通知设置。
+              </span>
+            )}
           </div>
           <div className="settings-item-control">
+            {notifyEnabled && (
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '5px 12px', marginRight: 8 }}
+                onClick={handleTestNotification}
+                type="button"
+              >
+                测试通知
+              </button>
+            )}
             <button
               className={`toggle-switch ${notifyEnabled ? 'toggle-on' : ''}`}
               onClick={handleNotifyToggle}

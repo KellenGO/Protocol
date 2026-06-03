@@ -2069,27 +2069,22 @@ pub fn run() {
             app.manage(database);
 
             // --- System tray ---
+            // 只保留"打开 Protocol"。
+            // 不提供"退出"菜单项，因为 app.exit(0) 会绕过前端的 active-flow 关闭确认。
+            // 用户应通过窗口关闭按钮正常退出，以触发 main.tsx 中的确认逻辑。
             let open_item = MenuItemBuilder::with_id("open", "打开 Protocol").build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
-            let tray_menu = MenuBuilder::new(app)
-                .item(&open_item)
-                .item(&quit_item)
-                .build()?;
+            let tray_menu = MenuBuilder::new(app).item(&open_item).build()?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&tray_menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "open" => {
+                .on_menu_event(|app, event| {
+                    if event.id() == "open" {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
                     }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
                 })
                 .build(app)?;
 

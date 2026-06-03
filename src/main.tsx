@@ -20,12 +20,20 @@ appWindow.onCloseRequested(async (event: { preventDefault: () => void }) => {
 
     if (focus || reservation) {
       event.preventDefault();
-      const lines: string[] = ['当前有活跃的协议流程：'];
-      if (focus) lines.push(`· 神圣座位：${focus.chain_name}${focus.pending_ruling ? '（待裁决）' : ''}`);
-      if (reservation) lines.push(`· 辅助链：${reservation.chain_name}${reservation.pending_ruling ? '（待裁决）' : ''}`);
-      lines.push('');
-      lines.push('关闭窗口不会结束协议，协议状态将被保留。');
-      lines.push('确定要关闭吗？');
+      const parts: string[] = [];
+      if (focus) parts.push(`神圣座位「${focus.chain_name}」${focus.pending_ruling ? '待裁决' : '进行中'}`);
+      if (reservation) parts.push(`辅助链「${reservation.chain_name}」${reservation.pending_ruling ? '待裁决' : '进行中'}`);
+
+      const lines: string[] = [
+        'Protocol 中有活跃的协议流程：',
+        '',
+        ...parts.map((p) => `  ${p}`),
+        '',
+        '关闭窗口不会自动结束协议，协议状态将在数据库中保留。',
+        '重新打开应用后，你仍需回到任务页完成或裁决。',
+        '',
+        '确定要关闭窗口吗？',
+      ];
 
       const confirmed = window.confirm(lines.join('\n'));
       if (confirmed) {
