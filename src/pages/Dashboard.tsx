@@ -15,7 +15,7 @@ function eventLabel(event: ProtocolEvent): string {
     if (event.result === 'failed_precedent') return '主链判例化';
   } else {
     if (event.result === 'fulfilled') return '辅助链履约';
-    if (event.result === 'failed_reset') return '辅助链失败';
+    if (event.result === 'failed_reset') return '辅助链失败清零';
     if (event.result === 'failed_precedent') return '辅助链判例化';
   }
   return event.result;
@@ -25,8 +25,8 @@ function activeStateLabel(state: DashboardSummary['active_protocol_state']): str
   if (state === 'focus') return '神圣座位已占用';
   if (state === 'focus_pending_ruling') return '神圣座位待裁决';
   if (state === 'reservation_countdown') return '辅助链预约中';
-  if (state === 'reservation_due') return '辅助链已自动失败';
-  if (state === 'reservation_pending_ruling') return '辅助链预约中';
+  if (state === 'reservation_due') return '辅助链待确认';
+  if (state === 'reservation_pending_ruling') return '辅助链待裁决';
   return '无活跃协议流程';
 }
 

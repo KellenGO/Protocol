@@ -82,7 +82,15 @@ export default function ChainList() {
                   <span className="chain-stat-value">{chain.focus_duration_minutes}min</span>
                 </span>
                 <span className="chain-stat">
-                  <span className="chain-stat-label">辅助链</span>
+                  <span className="chain-stat-label">辅助</span>
+                  <span className="chain-stat-value">{chain.auxiliary_current_length} 节</span>
+                </span>
+                <span className="chain-stat">
+                  <span className="chain-stat-label">辅助最佳</span>
+                  <span className="chain-stat-value">{chain.auxiliary_best_length} 节</span>
+                </span>
+                <span className="chain-stat">
+                  <span className="chain-stat-label">预约</span>
                   <span className="chain-stat-value">{chain.auxiliary_delay_minutes}min</span>
                 </span>
                 <span className="chain-card-time">

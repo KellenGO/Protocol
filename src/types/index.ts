@@ -8,6 +8,8 @@ export interface Chain {
   auxiliary_trigger_action: string;
   auxiliary_delay_minutes: number;
   auxiliary_completion_condition: string;
+  auxiliary_current_length: number;
+  auxiliary_best_length: number;
   current_length: number;
   best_length: number;
   status: 'active' | 'archived';
@@ -83,8 +85,10 @@ export interface ActiveReservationSession {
   chain_id: number;
   created_at: string;
   due_at: string;
+  confirmation_due_at: string | null;
   trigger_action: string;
   completion_condition: string;
+  phase: 'countdown' | 'confirming' | 'pending_ruling';
 }
 
 export interface GlobalActiveFocusSession extends ActiveFocusSession {
@@ -108,6 +112,7 @@ export interface FailReservationResetResult {
     chain_id: number;
     created_at: string;
     due_at: string;
+    confirmation_due_at: string | null;
     fulfilled_at: string | null;
     result: 'fulfilled' | 'failed_reset' | 'failed_precedent' | null;
     failure_note: string | null;
@@ -170,6 +175,15 @@ export interface FormulaEvent {
     | 'rollback_child_deactivated';
   note: string;
   created_at: string;
+}
+
+export interface FormulaReview {
+  formula: RsipFormula;
+  events: FormulaEvent[];
+  child_count: number;
+  active_child_count: number;
+  rollback_event_count: number;
+  latest_deactivation_note: string | null;
 }
 
 export interface RsipSummary {

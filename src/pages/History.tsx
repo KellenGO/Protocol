@@ -24,7 +24,7 @@ function eventLabel(event: ProtocolTimelineEvent): string {
   if (event.event_type === 'reservation') {
     if (event.result === 'fulfilled') return '辅助链履约：按约定进入神圣座位';
     if (event.result === 'failed_reset') {
-      return `辅助链失败：${event.note ? `${event.note}，` : ''}主链长度不受影响`;
+      return `辅助链失败：${event.note ? `${event.note}，` : ''}辅助链清零，主链长度不受影响`;
     }
     if (event.result === 'failed_precedent') {
       return `辅助链判例化：允许“${title}”，未来同类情况默认允许`;

@@ -10,6 +10,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [focusDur, setFocusDur] = useState('');
   const [reservationDur, setReservationDur] = useState('');
+  const [confirmationDur, setConfirmationDur] = useState('');
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
 
@@ -18,6 +19,7 @@ export default function Settings() {
       .then((s) => {
         setFocusDur(getValue(s, 'default_focus_duration'));
         setReservationDur(getValue(s, 'default_reservation_duration'));
+        setConfirmationDur(getValue(s, 'auxiliary_confirmation_window_minutes') || '3');
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
@@ -102,6 +104,31 @@ export default function Settings() {
               onClick={() => saveSetting('default_reservation_duration', reservationDur)}
             >
               {saving['default_reservation_duration'] ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+
+        <div className="settings-item">
+          <div className="settings-item-info">
+            <span className="settings-item-label">辅助链确认窗口</span>
+            <span className="settings-item-hint">
+              第二预约信号触发后的确认时间，单位分钟。默认 3 分钟。
+            </span>
+          </div>
+          <div className="settings-item-control">
+            <input
+              type="number"
+              className="settings-input"
+              value={confirmationDur}
+              onChange={(e) => setConfirmationDur(e.target.value)}
+              min={1}
+            />
+            <button
+              className="btn btn-secondary"
+              disabled={saving['auxiliary_confirmation_window_minutes']}
+              onClick={() => saveSetting('auxiliary_confirmation_window_minutes', confirmationDur)}
+            >
+              {saving['auxiliary_confirmation_window_minutes'] ? '保存中...' : '保存'}
             </button>
           </div>
         </div>

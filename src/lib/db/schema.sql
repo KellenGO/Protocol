@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS chains (
     auxiliary_trigger_action TEXT NOT NULL DEFAULT '启动辅助链',
     auxiliary_delay_minutes INTEGER NOT NULL DEFAULT 15,
     auxiliary_completion_condition TEXT NOT NULL DEFAULT '',
+    auxiliary_current_length INTEGER NOT NULL DEFAULT 0,
+    auxiliary_best_length INTEGER NOT NULL DEFAULT 0,
     current_length INTEGER NOT NULL DEFAULT 0,
     best_length INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
@@ -40,6 +42,7 @@ CREATE TABLE IF NOT EXISTS reservation_sessions (
     chain_id INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     due_at TEXT NOT NULL,
+    confirmation_due_at TEXT,
     fulfilled_at TEXT,
     result TEXT CHECK(result IN ('fulfilled', 'failed_reset', 'failed_precedent')),
     failure_note TEXT,
@@ -93,4 +96,5 @@ CREATE TABLE IF NOT EXISTS formula_events (
 -- Default settings
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_focus_duration', '25');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_reservation_duration', '15');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('auxiliary_confirmation_window_minutes', '3');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('enable_notifications', 'false');

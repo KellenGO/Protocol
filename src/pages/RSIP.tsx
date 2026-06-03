@@ -4,10 +4,11 @@ import {
   createRsipFormula,
   deactivateRsipFormula,
   getFormulaEvents,
+  getRsipFormulaReview,
   getRsipFormulas,
 } from '../lib/db';
 import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
-import type { FormulaEvent, RsipFormula } from '../types';
+import type { FormulaEvent, FormulaReview, RsipFormula } from '../types';
 
 interface FormulaNode extends RsipFormula {
   children: FormulaNode[];
@@ -40,6 +41,8 @@ export default function RSIP() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [workingId, setWorkingId] = useState<number | null>(null);
+  const [review, setReview] = useState<FormulaReview | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -57,6 +60,19 @@ export default function RSIP() {
     ]);
     setFormulas(nextFormulas);
     setEvents(nextEvents);
+  }
+
+  async function loadReview(id: number) {
+    setReviewLoading(true);
+    setError('');
+    try {
+      const nextReview = await getRsipFormulaReview(id);
+      setReview(nextReview);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setReviewLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -95,6 +111,7 @@ export default function RSIP() {
     try {
       await activateRsipFormula(id);
       await reload();
+      if (review?.formula.id === id) await loadReview(id);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -108,6 +125,7 @@ export default function RSIP() {
     try {
       await deactivateRsipFormula(id, '用户裁定该定式当前熄灭');
       await reload();
+      if (review?.formula.id === id) await loadReview(id);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -167,6 +185,7 @@ export default function RSIP() {
                   depth={0}
                   workingId={workingId}
                   onAddChild={(id) => setParentId(id)}
+                  onReview={loadReview}
                   onActivate={handleActivate}
                   onDeactivate={handleDeactivate}
                 />
@@ -176,6 +195,8 @@ export default function RSIP() {
         </section>
 
         <aside className="rsip-side-panel">
+          <RsipReviewPanel review={review} loading={reviewLoading} />
+
           <section className="rsip-create-card">
             <h3>{parentId ? '创建子定式' : '创建根定式'}</h3>
             {parentId && (
@@ -249,6 +270,7 @@ function FormulaTreeNode({
   depth,
   workingId,
   onAddChild,
+  onReview,
   onActivate,
   onDeactivate,
 }: {
@@ -256,6 +278,7 @@ function FormulaTreeNode({
   depth: number;
   workingId: number | null;
   onAddChild: (id: number) => void;
+  onReview: (id: number) => void;
   onActivate: (id: number) => void;
   onDeactivate: (id: number) => void;
 }) {
@@ -280,6 +303,9 @@ function FormulaTreeNode({
           </div>
         </div>
         <div className="formula-node-actions">
+          <button className="btn btn-secondary" onClick={() => onReview(node.id)}>
+            复盘
+          </button>
           <button className="btn btn-secondary" onClick={() => onAddChild(node.id)}>
             加子定式
           </button>
@@ -309,10 +335,79 @@ function FormulaTreeNode({
           depth={depth + 1}
           workingId={workingId}
           onAddChild={onAddChild}
+          onReview={onReview}
           onActivate={onActivate}
           onDeactivate={onDeactivate}
         />
       ))}
+    </div>
+  );
+}
+
+function RsipReviewPanel({
+  review,
+  loading,
+}: {
+  review: FormulaReview | null;
+  loading: boolean;
+}) {
+  return (
+    <section className="rsip-review-card">
+      <h3>定式复盘</h3>
+      {loading ? (
+        <p className="placeholder-text">复盘加载中...</p>
+      ) : !review ? (
+        <p className="placeholder-text">在定式树中选择一个定式进行复盘。</p>
+      ) : (
+        <>
+          <div className="rsip-review-head">
+            <span className={`formula-status status-${review.formula.status}`}>
+              {review.formula.status === 'active' ? '点亮' : '未点亮'}
+            </span>
+            <strong>{review.formula.title}</strong>
+          </div>
+          {review.formula.description && (
+            <p className="rsip-review-desc">{review.formula.description}</p>
+          )}
+          <div className="rsip-review-grid">
+            <ReviewMetric label="创建" value={formatProtocolDateTime(review.formula.created_at)} />
+            <ReviewMetric label="点亮" value={review.formula.activated_at ? formatProtocolDateTime(review.formula.activated_at) : '-'} />
+            <ReviewMetric label="熄灭" value={review.formula.deactivated_at ? formatProtocolDateTime(review.formula.deactivated_at) : '-'} />
+            <ReviewMetric label="依赖子定式" value={`${review.active_child_count}/${review.child_count} active`} />
+            <ReviewMetric label="回滚影响" value={`${review.rollback_event_count} 次`} />
+          </div>
+          <div className="rsip-review-note">
+            <span>最近熄灭裁定</span>
+            <p>{review.latest_deactivation_note || '暂无熄灭备注'}</p>
+          </div>
+          <div className="formula-events compact-events">
+            {review.events.length === 0 ? (
+              <p className="placeholder-text">暂无事件</p>
+            ) : (
+              review.events.map((event) => (
+                <div key={event.id} className="formula-event">
+                  <div className="formula-event-main">
+                    <span className={`formula-event-type event-${event.event_type}`}>
+                      {formulaEventLabel(event.event_type)}
+                    </span>
+                  </div>
+                  <span className="formula-event-time">{formatProtocolDateTime(event.created_at)}</span>
+                  {event.note && <p className="formula-event-note">{event.note}</p>}
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ReviewMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rsip-review-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }

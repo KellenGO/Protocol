@@ -48,9 +48,18 @@ export default function GlobalFocusButton() {
 
           if (reservation) {
             setActive({ kind: 'reservation', data: reservation });
-            setIsDue(false);
-            setShowToast(false);
-            toastedSessionRef.current = null;
+            const confirming = reservation.phase === 'confirming';
+            setIsDue(confirming);
+            const toastKey = `reservation-${reservation.id}`;
+            if (confirming && toastedSessionRef.current !== toastKey) {
+              toastedSessionRef.current = toastKey;
+              setShowToast(true);
+              setTimeout(() => setShowToast(false), 4000);
+            }
+            if (!confirming) {
+              setShowToast(false);
+              toastedSessionRef.current = null;
+            }
             return;
           }
 
@@ -79,7 +88,9 @@ export default function GlobalFocusButton() {
     <>
       {showToast && (
         <div className="global-toast">
-          神圣座位时间已到，请确认主链完成
+          {active.kind === 'reservation'
+            ? '辅助链进入确认窗口，请进入主链或等待自动失败'
+            : '神圣座位时间已到，请确认主链完成'}
         </div>
       )}
 
@@ -100,6 +111,7 @@ function getLabel(active: NonNullable<GlobalActiveState>, isDue: boolean): strin
     return isDue ? '主链待完成' : '回到神圣座位';
   }
 
-  if (active.data.pending_ruling) return '辅助链预约中';
-  return isDue ? '辅助链已过期' : '辅助链预约中';
+  if (active.data.pending_ruling) return '辅助链待裁决';
+  if (active.data.phase === 'confirming') return '辅助链待确认';
+  return isDue ? '辅助链待确认' : '辅助链预约中';
 }

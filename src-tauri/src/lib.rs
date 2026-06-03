@@ -5,7 +5,7 @@ use tauri::Manager;
 
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const AUXILIARY_EXPIRED_NOTE: &str = "未在预约时间内进入主链";
-const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, current_length, best_length, status, created_at, updated_at";
+const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
 const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at";
 
 fn clean_option(value: Option<String>) -> String {
@@ -50,11 +50,13 @@ fn chain_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
         "auxiliary_trigger_action": row.get::<_, String>(6)?,
         "auxiliary_delay_minutes": row.get::<_, i64>(7)?,
         "auxiliary_completion_condition": row.get::<_, String>(8)?,
-        "current_length": row.get::<_, i64>(9)?,
-        "best_length": row.get::<_, i64>(10)?,
-        "status": row.get::<_, String>(11)?,
-        "created_at": row.get::<_, String>(12)?,
-        "updated_at": row.get::<_, String>(13)?,
+        "auxiliary_current_length": row.get::<_, i64>(9)?,
+        "auxiliary_best_length": row.get::<_, i64>(10)?,
+        "current_length": row.get::<_, i64>(11)?,
+        "best_length": row.get::<_, i64>(12)?,
+        "status": row.get::<_, String>(13)?,
+        "created_at": row.get::<_, String>(14)?,
+        "updated_at": row.get::<_, String>(15)?,
     }))
 }
 
@@ -93,14 +95,75 @@ fn get_chain_json(conn: &rusqlite::Connection, id: i64) -> Result<serde_json::Va
     .map_err(|e| e.to_string())
 }
 
+fn reservation_phase_from_times(
+    due_at: &str,
+    confirmation_due_at: Option<&str>,
+    failure_note: Option<&str>,
+    now: &str,
+) -> &'static str {
+    if failure_note == Some(PENDING_RULING_NOTE) {
+        return "pending_ruling";
+    }
+
+    if now < due_at {
+        "countdown"
+    } else {
+        let confirmation_due_at = confirmation_due_at.unwrap_or(due_at);
+        if now < confirmation_due_at {
+            "confirming"
+        } else {
+            "confirming"
+        }
+    }
+}
+
+fn reservation_failure_is_due(
+    due_at: &str,
+    confirmation_due_at: Option<&str>,
+    now: &str,
+) -> bool {
+    now >= confirmation_due_at.unwrap_or(due_at)
+}
+
+fn get_auxiliary_confirmation_window_minutes(conn: &rusqlite::Connection) -> Result<i64, String> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'auxiliary_confirmation_window_minutes'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    let parsed = value
+        .as_deref()
+        .unwrap_or("3")
+        .trim()
+        .parse::<i64>()
+        .unwrap_or(3);
+    Ok(parsed.clamp(1, 60))
+}
+
 fn expire_overdue_reservation_sessions(conn: &rusqlite::Connection) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE chains
+         SET auxiliary_current_length = 0,
+             updated_at = datetime('now')
+         WHERE id IN (
+             SELECT chain_id FROM reservation_sessions
+             WHERE result IS NULL
+               AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')
+         )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
     conn.execute(
         "UPDATE reservation_sessions
          SET result = 'failed_reset',
              failure_note = ?1,
              debug_category = NULL,
              debug_note = NULL
-         WHERE result IS NULL AND datetime(due_at) <= datetime('now')",
+         WHERE result IS NULL AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')",
         [AUXILIARY_EXPIRED_NOTE],
     )
     .map_err(|e| e.to_string())
@@ -112,7 +175,7 @@ fn reservation_failure_result_json(
     chain_id: i64,
 ) -> Result<serde_json::Value, String> {
     let session = conn.query_row(
-        "SELECT id, chain_id, created_at, due_at, fulfilled_at, result, failure_note, trigger_action, completion_condition, debug_category, debug_note FROM reservation_sessions WHERE id = ?1",
+        "SELECT id, chain_id, created_at, due_at, confirmation_due_at, fulfilled_at, result, failure_note, trigger_action, completion_condition, debug_category, debug_note FROM reservation_sessions WHERE id = ?1",
         [reservation_id],
         |row| {
             Ok(serde_json::json!({
@@ -120,13 +183,14 @@ fn reservation_failure_result_json(
                 "chain_id": row.get::<_, i64>(1)?,
                 "created_at": row.get::<_, String>(2)?,
                 "due_at": row.get::<_, String>(3)?,
-                "fulfilled_at": row.get::<_, Option<String>>(4)?,
-                "result": row.get::<_, Option<String>>(5)?,
-                "failure_note": row.get::<_, Option<String>>(6)?,
-                "trigger_action": row.get::<_, String>(7)?,
-                "completion_condition": row.get::<_, String>(8)?,
-                "debug_category": row.get::<_, Option<String>>(9)?,
-                "debug_note": row.get::<_, Option<String>>(10)?,
+                "confirmation_due_at": row.get::<_, Option<String>>(4)?,
+                "fulfilled_at": row.get::<_, Option<String>>(5)?,
+                "result": row.get::<_, Option<String>>(6)?,
+                "failure_note": row.get::<_, Option<String>>(7)?,
+                "trigger_action": row.get::<_, String>(8)?,
+                "completion_condition": row.get::<_, String>(9)?,
+                "debug_category": row.get::<_, Option<String>>(10)?,
+                "debug_note": row.get::<_, Option<String>>(11)?,
             }))
         },
     )
@@ -159,14 +223,23 @@ fn expire_reservation_session_by_id(
                  failure_note = ?2,
                  debug_category = NULL,
                  debug_note = NULL
-             WHERE id = ?1 AND result IS NULL AND datetime(due_at) <= datetime('now')",
+             WHERE id = ?1 AND result IS NULL AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')",
             rusqlite::params![reservation_id, AUXILIARY_EXPIRED_NOTE],
         )
         .map_err(|e| e.to_string())?;
 
     if rows == 0 {
-        return Err("辅助链预约窗口尚未结束".into());
+        return Err("辅助链确认窗口尚未结束".into());
     }
+
+    conn.execute(
+        "UPDATE chains
+         SET auxiliary_current_length = 0,
+             updated_at = datetime('now')
+         WHERE id = ?1",
+        [chain_id],
+    )
+    .map_err(|e| e.to_string())?;
 
     reservation_failure_result_json(conn, reservation_id, chain_id)
 }
@@ -786,7 +859,7 @@ fn get_global_active_reservation_session(
     expire_overdue_reservation_sessions(&conn)?;
     let result = conn
         .query_row(
-            "SELECT r.id, r.chain_id, r.created_at, r.due_at, c.name as chain_name, r.failure_note, r.trigger_action, r.completion_condition
+            "SELECT r.id, r.chain_id, r.created_at, r.due_at, r.confirmation_due_at, c.name as chain_name, r.failure_note, r.trigger_action, r.completion_condition, datetime('now')
              FROM reservation_sessions r
              JOIN chains c ON c.id = r.chain_id
              WHERE r.result IS NULL
@@ -798,10 +871,17 @@ fn get_global_active_reservation_session(
                     "chain_id": row.get::<_, i64>(1)?,
                     "created_at": row.get::<_, String>(2)?,
                     "due_at": row.get::<_, String>(3)?,
-                    "chain_name": row.get::<_, String>(4)?,
-                    "pending_ruling": row.get::<_, Option<String>>(5)?.as_deref() == Some(PENDING_RULING_NOTE),
-                    "trigger_action": row.get::<_, String>(6)?,
-                    "completion_condition": row.get::<_, String>(7)?,
+                    "confirmation_due_at": row.get::<_, Option<String>>(4)?,
+                    "chain_name": row.get::<_, String>(5)?,
+                    "pending_ruling": row.get::<_, Option<String>>(6)?.as_deref() == Some(PENDING_RULING_NOTE),
+                    "phase": reservation_phase_from_times(
+                        row.get::<_, String>(3)?.as_str(),
+                        row.get::<_, Option<String>>(4)?.as_deref(),
+                        row.get::<_, Option<String>>(6)?.as_deref(),
+                        row.get::<_, String>(9)?.as_str(),
+                    ),
+                    "trigger_action": row.get::<_, String>(7)?,
+                    "completion_condition": row.get::<_, String>(8)?,
                 }))
             },
         )
@@ -824,6 +904,7 @@ fn start_reservation_session(
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|_| "链不存在".to_string())?;
+    let confirmation_minutes = get_auxiliary_confirmation_window_minutes(&conn)?;
 
     let global_active: Option<(i64, String)> = conn
         .query_row(
@@ -856,19 +937,21 @@ fn start_reservation_session(
     }
 
     conn.execute(
-        "INSERT INTO reservation_sessions (chain_id, due_at, trigger_action, completion_condition) VALUES (?1, datetime('now', ?2), ?3, ?4)",
+        "INSERT INTO reservation_sessions (chain_id, due_at, confirmation_due_at, trigger_action, completion_condition)
+         VALUES (?1, datetime('now', ?2), datetime('now', ?2, ?5), ?3, ?4)",
         rusqlite::params![
             chain_id,
             format!("+{} minutes", delay_minutes),
             trigger_action,
-            completion_condition
+            completion_condition,
+            format!("+{} minutes", confirmation_minutes)
         ],
     )
     .map_err(|e| e.to_string())?;
 
     let id = conn.last_insert_rowid();
     conn.query_row(
-        "SELECT id, chain_id, created_at, due_at, trigger_action, completion_condition FROM reservation_sessions WHERE id = ?1",
+        "SELECT id, chain_id, created_at, due_at, confirmation_due_at, trigger_action, completion_condition FROM reservation_sessions WHERE id = ?1",
         [id],
         |row| {
             Ok(serde_json::json!({
@@ -876,8 +959,10 @@ fn start_reservation_session(
                 "chain_id": row.get::<_, i64>(1)?,
                 "created_at": row.get::<_, String>(2)?,
                 "due_at": row.get::<_, String>(3)?,
-                "trigger_action": row.get::<_, String>(4)?,
-                "completion_condition": row.get::<_, String>(5)?,
+                "confirmation_due_at": row.get::<_, Option<String>>(4)?,
+                "phase": "countdown",
+                "trigger_action": row.get::<_, String>(5)?,
+                "completion_condition": row.get::<_, String>(6)?,
             }))
         },
     )
@@ -891,25 +976,20 @@ fn fulfill_reservation_and_start_focus(
 ) -> Result<serde_json::Value, String> {
     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
 
-    let (chain_id, focus_dur, trigger_action, completion_condition, due_at): (i64, i64, String, String, String) = conn
+    let (chain_id, focus_dur, trigger_action, completion_condition, due_at, confirmation_due_at, now): (i64, i64, String, String, String, Option<String>, String) = conn
         .query_row(
-            "SELECT r.chain_id, c.focus_duration_minutes, c.trigger_action, c.completion_condition, r.due_at
+            "SELECT r.chain_id, c.focus_duration_minutes, c.trigger_action, c.completion_condition, r.due_at, r.confirmation_due_at, datetime('now')
              FROM reservation_sessions r
              JOIN chains c ON c.id = r.chain_id
              WHERE r.id = ?1 AND r.result IS NULL",
             [reservation_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
         )
         .map_err(|_| "辅助链不存在或已结束".to_string())?;
 
-    let due_past: bool = conn
-        .query_row("SELECT datetime(?) <= datetime('now')", [&due_at], |row| {
-            row.get(0)
-        })
-        .map_err(|e| e.to_string())?;
-    if due_past {
+    if reservation_failure_is_due(&due_at, confirmation_due_at.as_deref(), &now) {
         let _ = expire_reservation_session_by_id(&conn, reservation_id)?;
-        return Err("辅助链预约窗口已结束，已自动记录失败".into());
+        return Err("辅助链确认窗口已结束，已自动记录失败".into());
     }
 
     let has_active_focus: bool = conn
@@ -941,6 +1021,23 @@ fn fulfill_reservation_and_start_focus(
     tx.execute(
         "UPDATE reservation_sessions SET result = 'fulfilled', fulfilled_at = datetime('now') WHERE id = ?1",
         [reservation_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "UPDATE chains
+         SET auxiliary_current_length = auxiliary_current_length + 1,
+             updated_at = datetime('now')
+         WHERE id = ?1",
+        [chain_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "UPDATE chains
+         SET auxiliary_best_length = auxiliary_current_length
+         WHERE id = ?1 AND auxiliary_current_length > auxiliary_best_length",
+        [chain_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -1085,9 +1182,9 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
         [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
     ).ok();
 
-    let active_reservation: Option<(i64, String, String, Option<String>)> = conn.query_row(
-        "SELECT r.chain_id, c.name, r.due_at, r.failure_note FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id WHERE r.result IS NULL LIMIT 1",
-        [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?)),
+    let active_reservation: Option<(i64, String, String, Option<String>, Option<String>, String)> = conn.query_row(
+        "SELECT r.chain_id, c.name, r.due_at, r.confirmation_due_at, r.failure_note, datetime('now') FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id WHERE r.result IS NULL LIMIT 1",
+        [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, String>(5)?)),
     ).ok();
 
     let (state, active_chain_id, active_chain_name) = if let Some((fid, fname, note)) = active_focus
@@ -1098,8 +1195,15 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
             "focus"
         };
         (state_str.to_string(), Some(fid), Some(fname))
-    } else if let Some((rid, rname, _due, _note)) = active_reservation {
-        let state_str = "reservation_countdown";
+    } else if let Some((rid, rname, due, confirmation_due, note, now)) = active_reservation {
+        let phase = reservation_phase_from_times(&due, confirmation_due.as_deref(), note.as_deref(), &now);
+        let state_str = if phase == "pending_ruling" {
+            "reservation_pending_ruling"
+        } else if phase == "confirming" {
+            "reservation_due"
+        } else {
+            "reservation_countdown"
+        };
         (state_str.to_string(), Some(rid), Some(rname))
     } else {
         ("none".to_string(), None, None)
@@ -1419,6 +1523,82 @@ fn get_formula_events(
 }
 
 #[tauri::command]
+fn get_rsip_formula_review(
+    state: tauri::State<'_, Database>,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let formula = conn
+        .query_row(
+            &format!(
+                "SELECT {} FROM rsip_formulas WHERE id = ?1",
+                RSIP_FORMULA_FIELDS
+            ),
+            [id],
+            rsip_formula_json,
+        )
+        .map_err(|_| "定式不存在".to_string())?;
+
+    let (child_count, active_child_count): (i64, i64) = conn
+        .query_row(
+            "WITH RECURSIVE descendants(id, status) AS (
+                SELECT id, status FROM rsip_formulas WHERE parent_id = ?1
+                UNION ALL
+                SELECT f.id, f.status FROM rsip_formulas f JOIN descendants d ON f.parent_id = d.id
+            )
+            SELECT COUNT(*), SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) FROM descendants",
+            [id],
+            |row| Ok((row.get(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rollback_event_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM formula_events WHERE event_type = 'rollback_child_deactivated' AND note LIKE ?1",
+            [format!("%父定式 {} 熄灭%", id)],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let latest_deactivation_note: Option<String> = conn
+        .query_row(
+            "SELECT note FROM formula_events WHERE formula_id = ?1 AND event_type = 'deactivated' ORDER BY created_at DESC, id DESC LIMIT 1",
+            [id],
+            |row| row.get(0),
+        )
+        .ok();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.id, e.formula_id, f.title, e.event_type, e.note, e.created_at
+             FROM formula_events e
+             JOIN rsip_formulas f ON f.id = e.formula_id
+             WHERE e.formula_id = ?1
+             ORDER BY e.created_at DESC, e.id DESC
+             LIMIT 30",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([id], formula_event_json)
+        .map_err(|e| e.to_string())?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| e.to_string())?);
+    }
+
+    Ok(serde_json::json!({
+        "formula": formula,
+        "events": events,
+        "child_count": child_count,
+        "active_child_count": active_child_count,
+        "rollback_event_count": rollback_event_count,
+        "latest_deactivation_note": latest_deactivation_note,
+    }))
+}
+
+#[tauri::command]
 fn get_rsip_summary(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let total_formulas: i64 = conn
@@ -1597,6 +1777,7 @@ pub fn run() {
             activate_rsip_formula,
             deactivate_rsip_formula,
             get_formula_events,
+            get_rsip_formula_review,
             get_rsip_summary,
             get_protocol_timeline,
             get_app_settings,
@@ -1604,4 +1785,59 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reservation_phase_uses_confirmation_window() {
+        assert_eq!(
+            reservation_phase_from_times(
+                "2026-06-03 10:00:00",
+                Some("2026-06-03 10:03:00"),
+                None,
+                "2026-06-03 09:59:59",
+            ),
+            "countdown"
+        );
+        assert_eq!(
+            reservation_phase_from_times(
+                "2026-06-03 10:00:00",
+                Some("2026-06-03 10:03:00"),
+                None,
+                "2026-06-03 10:01:00",
+            ),
+            "confirming"
+        );
+        assert_eq!(
+            reservation_phase_from_times(
+                "2026-06-03 10:00:00",
+                Some("2026-06-03 10:03:00"),
+                Some(PENDING_RULING_NOTE),
+                "2026-06-03 10:01:00",
+            ),
+            "pending_ruling"
+        );
+    }
+
+    #[test]
+    fn reservation_failure_waits_for_confirmation_due_at() {
+        assert!(!reservation_failure_is_due(
+            "2026-06-03 10:00:00",
+            Some("2026-06-03 10:03:00"),
+            "2026-06-03 10:02:59",
+        ));
+        assert!(reservation_failure_is_due(
+            "2026-06-03 10:00:00",
+            Some("2026-06-03 10:03:00"),
+            "2026-06-03 10:03:00",
+        ));
+        assert!(reservation_failure_is_due(
+            "2026-06-03 10:00:00",
+            None,
+            "2026-06-03 10:00:00",
+        ));
+    }
 }

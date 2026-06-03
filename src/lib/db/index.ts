@@ -14,6 +14,7 @@ import type {
   GlobalActiveFocusSession,
   GlobalActiveReservationSession,
   FormulaEvent,
+  FormulaReview,
   ProtocolEvent,
   ProtocolTimelineEvent,
   RsipFormula,
@@ -218,4 +219,8 @@ export async function getFormulaEvents(limit = 20): Promise<FormulaEvent[]> {
 
 export async function getRsipSummary(): Promise<RsipSummary> {
   return invoke('get_rsip_summary');
+}
+
+export async function getRsipFormulaReview(id: number): Promise<FormulaReview> {
+  return invoke('get_rsip_formula_review', { id });
 }

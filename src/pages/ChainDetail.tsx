@@ -19,7 +19,7 @@ import type {
   FailReservationResetResult,
 } from '../types';
 
-type AuxiliaryPhase = 'idle' | 'countdown' | 'expired';
+type AuxiliaryPhase = 'idle' | 'countdown' | 'confirming' | 'expired';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -29,6 +29,17 @@ function formatTime(sec: number): string {
 
 function formatDateTime(raw: string): string {
   return new Date(raw + 'Z').toLocaleString('zh-CN');
+}
+
+function reservationTargetTime(reservation: ActiveReservationSession): number {
+  const target = reservation.phase === 'confirming'
+    ? reservation.confirmation_due_at ?? reservation.due_at
+    : reservation.due_at;
+  return new Date(target + 'Z').getTime();
+}
+
+function auxiliaryPhaseFromReservation(reservation: ActiveReservationSession): AuxiliaryPhase {
+  return reservation.phase === 'confirming' ? 'confirming' : 'countdown';
 }
 
 export default function ChainDetail() {
@@ -95,10 +106,11 @@ export default function ChainDetail() {
         setHasActiveFocusOnThisChain(globalFocus !== null && globalFocus.chain_id === chainId);
 
         if (globalReservation && globalReservation.chain_id === chainId) {
-          const due = new Date(globalReservation.due_at + 'Z').getTime();
-          const left = Math.max(0, Math.ceil((due - Date.now()) / 1000));
+          const phase = auxiliaryPhaseFromReservation(globalReservation);
+          const target = reservationTargetTime(globalReservation);
+          const left = Math.max(0, Math.ceil((target - Date.now()) / 1000));
 
-          if (left <= 0) {
+          if (left <= 0 && phase === 'confirming') {
             const expired = await expireReservationSession(globalReservation.id);
             if (cancelled) return;
             setExpiredResult(expired);
@@ -110,7 +122,7 @@ export default function ChainDetail() {
 
           setReservation(globalReservation);
           setRemaining(left);
-          setAuxiliaryPhase('countdown');
+          setAuxiliaryPhase(phase);
         } else {
           setReservation(null);
           setRemaining(0);
@@ -133,7 +145,7 @@ export default function ChainDetail() {
   }, [chainId]);
 
   useEffect(() => {
-    if (auxiliaryPhase !== 'countdown') return;
+    if (auxiliaryPhase !== 'countdown' && auxiliaryPhase !== 'confirming') return;
 
     timerRef.current = setInterval(() => {
       setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
@@ -145,13 +157,20 @@ export default function ChainDetail() {
   }, [auxiliaryPhase]);
 
   useEffect(() => {
-    if (remaining !== 0 || auxiliaryPhase !== 'countdown') return;
+    if (remaining !== 0) return;
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    handleExpireAuxiliary();
-  }, [remaining, auxiliaryPhase, handleExpireAuxiliary]);
+    if (auxiliaryPhase === 'countdown' && reservation) {
+      const confirmationTarget = new Date((reservation.confirmation_due_at ?? reservation.due_at) + 'Z').getTime();
+      setRemaining(Math.max(0, Math.ceil((confirmationTarget - Date.now()) / 1000)));
+      setReservation({ ...reservation, phase: 'confirming' });
+      setAuxiliaryPhase('confirming');
+      return;
+    }
+    if (auxiliaryPhase === 'confirming') handleExpireAuxiliary();
+  }, [remaining, auxiliaryPhase, handleExpireAuxiliary, reservation]);
 
   async function enterMainFromReservation(reservationId: number) {
     const result = await fulfillReservationAndStartFocus(reservationId);
@@ -216,11 +235,11 @@ export default function ChainDetail() {
       }
 
       const created = await startReservationSession(chain.id);
-      const due = new Date(created.due_at + 'Z').getTime();
-      const left = Math.max(1, Math.ceil((due - Date.now()) / 1000));
+      const target = reservationTargetTime(created);
+      const left = Math.max(1, Math.ceil((target - Date.now()) / 1000));
       setReservation(created);
       setRemaining(left);
-      setAuxiliaryPhase('countdown');
+      setAuxiliaryPhase(auxiliaryPhaseFromReservation(created));
       navigate(`/chains/${chain.id}?mode=aux`, { replace: true });
     } catch (err) {
       setError(String(err));
@@ -272,7 +291,7 @@ export default function ChainDetail() {
     ...reservationPrecedents.map((item) => ({ ...item, source: '辅助链' })),
   ];
 
-  const mainButtonLabel = auxiliaryPhase === 'countdown' ? '进入主链' : '启动主链';
+  const mainButtonLabel = auxiliaryPhase === 'countdown' || auxiliaryPhase === 'confirming' ? '进入主链' : '启动主链';
 
   return (
     <div className="page">
@@ -313,6 +332,8 @@ export default function ChainDetail() {
         <div className="protocol-grid">
           <ProtocolFact label="预约时间" value={`${chain.auxiliary_delay_minutes} 分钟`} />
           <ProtocolFact label="完成条件" value={chain.auxiliary_completion_condition} />
+          <ProtocolFact label="当前辅助链" value={`${chain.auxiliary_current_length} 节`} />
+          <ProtocolFact label="最佳辅助链" value={`${chain.auxiliary_best_length} 节`} />
         </div>
       </div>
 
@@ -332,7 +353,7 @@ export default function ChainDetail() {
 
         <button
           className="btn btn-secondary"
-          disabled={startingAuxiliary || auxiliaryPhase === 'countdown' || hasActiveFocusOnThisChain}
+          disabled={startingAuxiliary || auxiliaryPhase === 'countdown' || auxiliaryPhase === 'confirming' || hasActiveFocusOnThisChain}
           onClick={handleStartAuxiliary}
         >
           {startingAuxiliary ? '启动中...' : '启动辅助链'}
@@ -413,7 +434,7 @@ function AuxiliaryRuntime({
       <div className="auxiliary-runtime">
         <h3>辅助链已自动失败</h3>
         <p className="ruling-result-desc">
-          辅助链未在预约窗口内进入主链，已记录失败。主链 {chainUpdate.name} 的长度不受影响。
+          辅助链未在确认窗口内进入主链，已记录失败。主链 {chainUpdate.name} 的长度不受影响，辅助链连续长度已清零。
         </p>
         <div className="focus-chain-update">
           <span className="focus-chain-label">{chainUpdate.name}</span>
@@ -423,6 +444,14 @@ function AuxiliaryRuntime({
             </span>
             <span className="focus-chain-item">
               最佳 <strong>{chainUpdate.best_length}</strong> 节
+            </span>
+          </div>
+          <div className="focus-chain-numbers">
+            <span className="focus-chain-item">
+              辅助当前 <strong>{chainUpdate.auxiliary_current_length}</strong> 节
+            </span>
+            <span className="focus-chain-item">
+              辅助最佳 <strong>{chainUpdate.auxiliary_best_length}</strong> 节
             </span>
           </div>
         </div>
@@ -435,19 +464,27 @@ function AuxiliaryRuntime({
   return (
     <div className="auxiliary-runtime">
       <div className="res-session-header">
-        <span className="res-chain-name">{chain.name} / 辅助链预约中</span>
-        <span className="res-due-label">窗口结束 {formatDateTime(reservation.due_at)}</span>
+        <span className="res-chain-name">
+          {chain.name} / {phase === 'confirming' ? '辅助链待确认' : '辅助链预约中'}
+        </span>
+        <span className="res-due-label">
+          {phase === 'confirming'
+            ? `确认截止 ${formatDateTime(reservation.confirmation_due_at ?? reservation.due_at)}`
+            : `窗口结束 ${formatDateTime(reservation.due_at)}`}
+        </span>
       </div>
       <div className="focus-timer">
         <span className="focus-time">{formatTime(remaining)}</span>
-        <span className="focus-status">预约窗口</span>
+        <span className="focus-status">{phase === 'confirming' ? '确认窗口' : '预约窗口'}</span>
       </div>
       <div className="res-actions">
         <button className="btn btn-primary btn-large" onClick={onEnterMain}>
           进入主链
         </button>
         <p className="focus-hint" style={{ textAlign: 'center' }}>
-          在倒计时结束前进入主链即视为辅助链履约成功。
+          {phase === 'confirming'
+            ? '第二预约信号已触发；确认窗口结束前进入主链仍视为履约成功。'
+            : '在预约窗口结束前进入主链即视为辅助链履约成功。'}
         </p>
       </div>
     </div>
