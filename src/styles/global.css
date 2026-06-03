@@ -232,6 +232,47 @@ body {
   font-size: 14px;
 }
 
+/* ===== Toggle Switch ===== */
+
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.toggle-switch.toggle-on {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.toggle-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s;
+}
+
+.toggle-on .toggle-knob {
+  transform: translateX(20px);
+}
+
 /* ===== Settings ===== */
 
 .settings-list {
