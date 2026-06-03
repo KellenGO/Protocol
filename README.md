@@ -1,100 +1,146 @@
 # Protocol
 
-这是一个基于知乎文章《如何提高自制力？》（https://www.zhihu.com/question/64688680）实现的app
+> 一款将 CTDP 与 RSIP 方法论软件化的离线优先桌面应用，用于帮助用户把「自控」从模糊意志问题，转化为可触发、可执行、可记录、可回滚、可迭代的协议系统。
 
-Protocol 是一个离线优先的桌面应用，用来把自制力规则转化为明确、可执行、可复盘的协议。
+Protocol 基于[知乎文章《如何提高自制力？》](https://www.zhihu.com/question/64688680)提出的方法论实现。
 
-它目前包含两套核心机制：
+---
 
-- **CTDP，链式延时协议（Chain Time-Delay Protocol）**：围绕主链和预约链展开，用于启动正式专注、裁定失败、保留严格的协议边界。
-- **RSIP，递归稳定迭代协议（Recursive Stable Iteration Protocol）**：围绕长期稳定规则建立公式树，支持激活、停用、事件历史和递归回滚。
+## Protocol 是什么
 
-当前版本处于 **V2 Gamma 之后的闭环成熟化阶段**。CTDP V1、V2 Alpha RSIP 定式树、V2 Beta 轻量裁决和 V2 Gamma 辅助链增强已经完成基础闭环；当前主线是把辅助链裁决、判例库和 RSIP 单定式维护做成可长期使用的离线桌面能力。
+Protocol 不是一个普通的番茄钟、待办清单或习惯打卡应用。它的核心不是「提醒用户要努力」，而是**为用户建立一套能够在关键行为节点上产生约束力，并可在长期生活中递归迭代的自控协议**。
 
-## 当前版本
+它包含两套核心机制：
 
-**版本号：** `v0.2.1`
+- **CTDP（链式时延协议）**：围绕主链和辅助链展开，用于启动正式专注、裁定失败、保留严格的协议边界。通过「神圣座位」「下必为例」「线性时延」三项原理，将自控从意志力问题转化为协议执行问题。
+- **RSIP（递归稳态迭代协议）**：围绕长期稳定规则建立定式树，支持点亮、熄灭、递归回滚与事件历史。通过「国策/定式节点」「国策树」「回滚机制」等概念，帮助用户在无外部压力的日常状态中逐步改善生活整体稳态。
 
-当前阶段的重点是让“预约 -> 确认 -> 裁决 -> 违约 / 判例 -> 协议边界维护”形成闭环。
+---
 
-主要变化：
+## 当前版本状态
 
-- 主链失败后进入轻量裁决。
-- 辅助链具有独立当前长度和最佳长度。
-- 辅助链到期后先进入确认窗口，确认窗口结束后进入待裁决。
-- 辅助链裁决支持违约清零或判例化。
-- 判例库支持详情查看、编辑和废止；废止判例保留历史但不再作为活跃边界。
-- RSIP 单定式复盘支持标题 / 执行说明维护，并允许在熄灭前填写本次备注。
-- 历史页使用协议语言展示 CTDP、辅助链和 RSIP 事件。
-- 当前产品边界是完整离线桌面版；AI、云同步、账号系统和手机 App 暂不进入当前主线。
+**版本号：** `v0.3.0`
 
-## 功能
+Protocol 已经进入 **V2 Gamma 之后的闭环成熟化阶段**，并正在向可稳定发布的质量基准线推进。
 
-### CTDP
+| 里程碑 | 状态 |
+|--------|------|
+| CTDP V1（主链、预约、裁决、判例） | ✅ 已完成 |
+| V2 Alpha（RSIP 定式树） | ✅ 已完成 |
+| V2 Beta（轻量裁决、协议边界） | ✅ 已完成 |
+| V2 Gamma（辅助链连续性、第二预约信号、RSIP 单定式复盘） | ✅ 已完成 |
+| 辅助链裁决闭环 | ✅ 已完成 |
+| 判例库管理（查看/编辑/废止） | ✅ 已完成 |
+| RSIP 单定式维护 | ✅ 已完成 |
+| 发布质量保障 | 🔄 当前分支 |
 
-- 创建和管理主链。
-- 使用每条链的“圣座”标记作为正式专注会话的可见触发标签。
-- 完成专注会话并延长链长。
-- 会话失败后进入正式裁定。
-- 将失败判定为违规，并中断主链。
-- 将有争议的行为转化为先例，以保留链的边界。
-- 创建预约会话，并将其兑现为正式专注会话。
-- 辅助链到期后进入确认窗口，再进入正式裁决。
-- 裁定辅助链违约并清零辅助链，或将其转化为辅助链判例。
-- 查看、编辑和废止主链 / 辅助链判例。
-- 在历史页复盘主链、辅助链和判例相关事件。
+---
 
-### RSIP
+## 技术栈
 
-- 创建根公式和子公式。
-- 激活和停用公式。
-- 停用父公式时，递归回滚活跃的子公式。
-- 在统一历史页记录 RSIP 事件。
-- 在仪表盘展示 RSIP 汇总数据。
-- 查看单个定式的生命周期、熄灭备注、回滚影响和事件历史。
-- 在复盘面板中编辑定式标题和执行说明。
-- 熄灭当前复盘定式时记录用户填写的熄灭备注。
+| 层 | 技术 |
+|----|------|
+| 桌面框架 | Tauri 2 |
+| 前端 | React 19 + TypeScript |
+| 路由 | React Router v7 |
+| 构建工具 | Vite 8 |
+| 后端 | Rust |
+| 数据库 | SQLite（通过 rusqlite，bundled 模式） |
+| 样式 | 纯 CSS（无第三方 UI 框架） |
 
-### 桌面应用
+---
 
-- 基于 Tauri 2 的桌面外壳。
-- React + TypeScript 前端。
-- 本地 SQLite 存储。
-- 不依赖云端服务。
-- 不需要账号系统。
-- 不使用第三方 UI 框架。
+## 功能范围
 
-## 项目状态
+### CTDP 主链系统
 
-Protocol 不是通用番茄钟、待办清单、习惯打卡工具，也不是游戏化效率应用。
+- 创建和管理主链，设置神圣座位触发动作、专注时长、完成条件
+- 启动正式专注任务
+- 完成任务 → 链长度 +1
+- 任务失败 → 正式裁决（违规清零 / 判例化）
+- 失败调试记录（触发动作太重、完成条件过高、时间太长等）
 
-当前开发线：
+### CTDP 辅助链系统
 
-- **已完成：** CTDP V1 最小日常使用闭环。
-- **已完成：** V2 Alpha RSIP 公式树。
-- **已完成：** V2 Beta 轻量裁决和协议边界。
-- **已完成：** V2 Gamma 辅助链长度、第二预约信号和 RSIP 单定式复盘。
-- **当前：** 辅助链裁决闭环、判例库成熟化第一版和 RSIP 单定式维护第一版。
-- **下一步：** RSIP 国策组 / 周期复盘、桌面通知、数据备份恢复和发布质量保障。
+- 每条主链内置辅助链配置
+- 预约启动（设定延迟、确认窗口）
+- 到期后进入确认窗口，可履约进入正式任务
+- 确认窗口结束后进入待裁决状态（非自动失败）
+- 裁决：辅助链违约清零 / 判例化
+- 辅助链拥有独立的当前长度和最佳长度
 
-更多细节见文档：
+### 判例库
 
-- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md)
-- [`docs/PROTOCOL_V2_CURRENT.md`](docs/PROTOCOL_V2_CURRENT.md)
-- [`docs/PROTOCOL_V2_BETA_REPORT.md`](docs/PROTOCOL_V2_BETA_REPORT.md)
-- [`docs/PROTOCOL_V2_GAMMA_REPORT.md`](docs/PROTOCOL_V2_GAMMA_REPORT.md)
-- [`docs/PROTOCOL_RSIP_V1_MATURITY_REPORT.md`](docs/PROTOCOL_RSIP_V1_MATURITY_REPORT.md)
-- [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md)
+- 主链判例与辅助链判例统一管理
+- 链详情页展示协议边界（合并展示两类判例，标签区分）
+- 判例可查看详情、编辑标题/描述、废止
+- 废止判例保留历史记录，但不再作为活跃协议边界
 
-历史规划文档保存在 [`docs/archive`](docs/archive)。
+### RSIP 定式树
+
+- 创建根定式 / 子定式
+- 树形缩进展示定式依赖关系
+- 点亮（激活）/ 熄灭（停用）定式
+- 父节点熄灭时递归回滚活跃子节点
+- 定式生命周期复盘面板
+- 熄灭时可填写自定义备注
+- 可编辑定式标题和执行说明
+
+### Dashboard 与 History
+
+- Dashboard 展示 CTDP 摘要与 RSIP 摘要
+- 当前协议状态指示（无活动 / 任务进行中 / 待裁决 / 预约倒计时 / 预约确认窗口）
+- History 展示 CTDP + 辅助链 + RSIP 的统一协议时间线
+- 支持按事件类型、结果筛选
+
+### 设置
+
+- 默认专注时长
+- 默认预约时长
+- 辅助链确认窗口时长
+- 通知开关
+
+---
+
+## 不包含什么
+
+Protocol 目前**不包含**以下功能，且短期内无计划加入：
+
+- ❌ AI 建议 / 智能分析
+- ❌ 云同步 / 多设备联动
+- ❌ 账号系统 / 登录注册
+- ❌ 手机 App（仅桌面）
+- ❌ 社区分享 / 社交功能
+- ❌ 积分 / 徽章 / 排行榜等游戏化元素
+- ❌ 桌面通知 / 窗口置顶（后续版本可能加入）
+- ❌ 复杂任务编组 / 精锐链 / 储君继承制
+- ❌ 国策组容错（后续版本）
+- ❌ 自动化 CI/CD 流水线
+
+这些功能并非不重要，而是为了让 Protocol 在当前阶段保持产品边界清晰。
+
+---
+
+## 数据存储说明
+
+**所有数据仅存储在本地，不会上传到任何服务器。**
+
+- 数据库文件：系统应用数据目录下的 `protocol.db`
+- 数据库引擎：SQLite（WAL 模式，外键约束开启）
+- 不依赖任何云端服务
+- 不需要网络连接即可正常使用
+- 如需备份，直接复制 `protocol.db` 文件即可
+
+---
 
 ## 开发
 
 ### 环境要求
 
-- Node.js 和 npm
-- Rust 工具链
-- Windows 上需要 Microsoft Visual C++ Build Tools
+- **Node.js** ≥ 18（推荐 20+）和 npm
+- **Rust 工具链**（通过 [rustup](https://rustup.rs/) 安装）
+- **Windows**：需要 Microsoft Visual C++ Build Tools
+- **macOS / Linux**：需要系统 C 编译器及相关库
 
 ### 安装依赖
 
@@ -102,53 +148,130 @@ Protocol 不是通用番茄钟、待办清单、习惯打卡工具，也不是�
 npm install
 ```
 
-### 只运行前端
+### 开发模式运行
 
 ```bash
+# 仅前端（浏览器开发）
 npm run dev
-```
 
-### 运行桌面应用
-
-```bash
+# 完整桌面应用
 npm run tauri dev
 ```
 
-### 构建前端
+### 构建
 
 ```bash
+# TypeScript 类型检查 + 前端构建
 npm run build
-```
 
-### 检查 Rust 侧代码
+# 仅类型检查
+npm run typecheck
 
-```bash
+# 完整检查（类型 + lint）
+npm run check
+
+# Rust 侧检查
 cd src-tauri
 cargo check
-```
 
-### 构建桌面安装包
-
-```bash
+# 构建 Windows 安装包
 npm run tauri build
 ```
+
+### 构建 Windows 安装包
+
+1. 确保安装了所有环境依赖（Node.js、Rust、VS Build Tools）
+2. 运行 `npm install`
+3. 运行 `npm run tauri build`
+4. 安装包生成在 `src-tauri/target/release/bundle/` 目录下
+   - `.msi` 安装包位于 `bundle/msi/`
+   - 便携版 `.exe` 位于 `bundle/nsis/`（如有 NSIS 配置）
+
+---
 
 ## 仓库结构
 
 ```text
 src/
   components/        共享 React 组件
-  lib/db/            前端命令封装
+  features/          功能模块
+  lib/db/            前端数据库命令封装
   pages/             应用页面
   styles/            全局 CSS
-  types/             TypeScript 类型
+  types/             TypeScript 类型定义
 src-tauri/
-  src/               Rust 命令、数据库初始化和应用入口
+  src/
+    db.rs            Rust 数据库初始化与迁移
+    lib.rs           Rust Tauri 命令
+    main.rs          应用入口
+  Cargo.toml         Rust 依赖配置
   tauri.conf.json    桌面应用配置
 docs/
+  PRODUCT_SPEC.md    产品规格说明
+  V2_ALPHA_PROTOCOL_MAP.md  V2 功能映射
+  PROTOCOL_V2_CURRENT.md    当前状态文档
+  QA_CHECKLIST.md    质量检查清单
+  RELEASE_PROCESS.md  发布流程
+  CHANGELOG.md       发布说明
   archive/           历史规划文档
 ```
 
+---
+
+## 基本故障排查
+
+### `npm install` 失败
+
+- 确保 Node.js 版本 ≥ 18
+- 尝试删除 `node_modules` 和 `package-lock.json` 后重试
+- Windows 用户确保安装了 Visual C++ Build Tools
+
+### `npm run tauri dev` 无法启动
+
+- 检查 Rust 是否安装：`rustc --version`
+- 检查 Tauri CLI：`npx tauri --version`
+- Windows：确保已安装 WebView2 运行时
+- 运行 `cargo check` 查看 Rust 侧编译错误
+
+### `npm run tauri build` 失败
+
+- 确保先运行 `npm install`
+- 检查 `src-tauri/target/` 目录权限
+- Windows 打包 MSI 需要 WiX Toolset（如未安装，Tauri 会提示）
+- 查看 `src-tauri/target/release/` 下的构建日志
+
+### 数据库问题
+
+- 数据库文件损坏：删除应用数据目录下的 `protocol.db`，重启应用会自动创建新数据库
+- 应用数据目录位置：
+  - Windows: `%APPDATA%/com.kellengo.protocol/`
+  - macOS: `~/Library/Application Support/com.kellengo.protocol/`
+  - Linux: `~/.local/share/com.kellengo.protocol/`
+
+### 应用无法启动
+
+- 检查是否有其他 Protocol 实例正在运行
+- 尝试删除应用数据目录（注意备份 `protocol.db`）
+- 查看系统日志或终端输出中的错误信息
+
+---
+
 ## 发布说明
 
-这个仓库目前发布早期 Windows 桌面构建。应用通过 SQLite 在本地存储数据，现阶段更适合作为 alpha / beta 阶段的个人工具，而不是生产级软件。
+详见：
+- [`CHANGELOG.md`](CHANGELOG.md) — 各版本功能摘要
+- [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md) — 发布操作流程
+- [`docs/QA_CHECKLIST.md`](docs/QA_CHECKLIST.md) — 质量检查清单
+
+---
+
+## 相关文档
+
+- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — 产品规格说明
+- [`docs/V2_ALPHA_PROTOCOL_MAP.md`](docs/V2_ALPHA_PROTOCOL_MAP.md) — V2 功能与理论映射
+- [`docs/PROTOCOL_V2_CURRENT.md`](docs/PROTOCOL_V2_CURRENT.md) — 当前状态
+- [`docs/PROTOCOL_V2_BETA_REPORT.md`](docs/PROTOCOL_V2_BETA_REPORT.md) — V2 Beta 报告
+- [`docs/PROTOCOL_V2_GAMMA_REPORT.md`](docs/PROTOCOL_V2_GAMMA_REPORT.md) — V2 Gamma 报告
+- [`docs/PROTOCOL_RSIP_V1_MATURITY_REPORT.md`](docs/PROTOCOL_RSIP_V1_MATURITY_REPORT.md) — RSIP 成熟度报告
+- [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) — 后续方向
+- [`docs/archive/`](docs/archive/) — 历史规划文档
