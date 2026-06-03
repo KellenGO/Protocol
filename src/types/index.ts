@@ -283,6 +283,7 @@ export interface ResetHistoryResult {
     precedents: number;
     rsip_formulas: number;
   };
+}
 
 /** 按主链复盘：单条链的汇总指标 */
 export interface ChainReviewStats {

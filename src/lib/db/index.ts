@@ -339,4 +339,3 @@ export async function getFailureDebugSummary(since?: string | null): Promise<Fai
 export async function getPrecedentReviewList(since?: string | null): Promise<PrecedentReviewItem[]> {
   return invoke('get_precedent_review_list', { since: since ?? null });
 }
-}
