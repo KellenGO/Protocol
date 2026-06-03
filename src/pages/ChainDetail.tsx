@@ -113,6 +113,7 @@ export default function ChainDetail() {
   const [precedentTitle, setPrecedentTitle] = useState('');
   const [precedentDescription, setPrecedentDescription] = useState('');
   const [precedentWorking, setPrecedentWorking] = useState(false);
+  const [precedentError, setPrecedentError] = useState('');
   const [error, setError] = useState('');
   const [warnMsg, setWarnMsg] = useState('');
 
@@ -301,13 +302,15 @@ export default function ChainDetail() {
 
   async function openPrecedent(id: number) {
     setPrecedentWorking(true);
+    setPrecedentError('');
     try {
       const item = await getPrecedent(id);
       setSelectedPrecedent(item);
       setPrecedentTitle(item.title);
       setPrecedentDescription(item.description);
-    } catch (err) {
-      setError(String(err));
+    } catch (_err) {
+      setPrecedentError('判例不存在或已被删除。');
+      setSelectedPrecedent(null);
     } finally {
       setPrecedentWorking(false);
     }
@@ -587,6 +590,11 @@ export default function ChainDetail() {
         )}
       </div>
 
+      {precedentError && (
+        <div className="precedents-section">
+          <p className="review-precedent-notice">{precedentError}</p>
+        </div>
+      )}
       <PrecedentPanel
         precedent={selectedPrecedent}
         title={precedentTitle}
@@ -594,7 +602,7 @@ export default function ChainDetail() {
         working={precedentWorking}
         setTitle={setPrecedentTitle}
         setDescription={setPrecedentDescription}
-        onClose={() => setSelectedPrecedent(null)}
+        onClose={() => { setSelectedPrecedent(null); setPrecedentError(''); }}
         onSave={handleUpdatePrecedent}
         onRetire={handleRetirePrecedent}
       />

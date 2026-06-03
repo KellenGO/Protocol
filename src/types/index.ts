@@ -283,4 +283,45 @@ export interface ResetHistoryResult {
     precedents: number;
     rsip_formulas: number;
   };
+
+/** 按主链复盘：单条链的汇总指标 */
+export interface ChainReviewStats {
+  chain_id: number;
+  chain_name: string;
+  status: 'active' | 'archived';
+  completed_count: number;
+  failed_reset_count: number;
+  failed_precedent_count: number;
+  reservation_fulfilled_count: number;
+  reservation_failed_reset_count: number;
+  reservation_failed_precedent_count: number;
+  current_length: number;
+  auxiliary_current_length: number;
+  best_length: number;
+  auxiliary_best_length: number;
+}
+
+/** 失败模式复盘：debug_category 聚合 */
+export interface FailureDebugSummary {
+  category: string;
+  count: number;
+  recent_notes: string[];
+  last_occurred_at: string | null;
+  chain_names: string[];
+}
+
+/** 判例复盘：判例 + 关联链名 */
+export interface PrecedentReviewItem {
+  id: number;
+  chain_id: number;
+  chain_name: string;
+  scope: 'main_chain' | 'reservation_chain';
+  title: string;
+  description: string;
+  created_from_session_id: number | null;
+  created_from_session_type: 'focus' | 'reservation' | null;
+  status: 'active' | 'retired';
+  created_at: string;
+  updated_at: string | null;
+  retired_at: string | null;
 }

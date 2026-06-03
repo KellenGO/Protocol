@@ -6,9 +6,11 @@ import type {
   BackupFileInfo,
   Chain,
   ChainPrecedent,
+  ChainReviewStats,
   CompleteFocusResult,
   DashboardSummary,
   DatabaseInfo,
+  FailureDebugSummary,
   FailResetResult,
   FailPrecedentResult,
   FailReservationPrecedentResult,
@@ -19,6 +21,7 @@ import type {
   FormulaEvent,
   FormulaReview,
   HistoryExport,
+  PrecedentReviewItem,
   ProtocolEvent,
   ProtocolPrecedent,
   ProtocolTimelineEvent,
@@ -321,4 +324,19 @@ export async function resetHistoryAndProgress(): Promise<ResetHistoryResult> {
 
 export async function getDbVersion(): Promise<number> {
   return invoke('get_db_version');
+}
+
+// ===== Review System =====
+
+export async function getChainReviewStats(since?: string | null): Promise<ChainReviewStats[]> {
+  return invoke('get_chain_review_stats', { since: since ?? null });
+}
+
+export async function getFailureDebugSummary(since?: string | null): Promise<FailureDebugSummary[]> {
+  return invoke('get_failure_debug_summary', { since: since ?? null });
+}
+
+export async function getPrecedentReviewList(since?: string | null): Promise<PrecedentReviewItem[]> {
+  return invoke('get_precedent_review_list', { since: since ?? null });
+}
 }

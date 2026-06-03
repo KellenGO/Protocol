@@ -1953,6 +1953,319 @@ fn get_rsip_summary(state: tauri::State<'_, Database>) -> Result<serde_json::Val
 }
 
 #[tauri::command]
+fn get_chain_review_stats(
+    state: tauri::State<'_, Database>,
+    since: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let since_filter = since
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let mut sql = String::from(
+        "SELECT
+            c.id,
+            c.name,
+            c.status,
+            c.current_length,
+            c.best_length,
+            c.auxiliary_current_length,
+            c.auxiliary_best_length,
+            COALESCE(f.completed, 0) AS completed_count,
+            COALESCE(f.failed_reset, 0) AS failed_reset_count,
+            COALESCE(f.failed_precedent, 0) AS failed_precedent_count,
+            COALESCE(r.fulfilled, 0) AS reservation_fulfilled_count,
+            COALESCE(r.failed_reset, 0) AS reservation_failed_reset_count,
+            COALESCE(r.failed_precedent, 0) AS reservation_failed_precedent_count
+        FROM chains c
+        LEFT JOIN (
+            SELECT chain_id,
+                SUM(CASE WHEN result = 'completed' THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN result = 'failed_reset' THEN 1 ELSE 0 END) AS failed_reset,
+                SUM(CASE WHEN result = 'failed_precedent' THEN 1 ELSE 0 END) AS failed_precedent
+            FROM focus_sessions
+            WHERE 1=1",
+    );
+
+    if since_filter.is_some() {
+        sql.push_str(" AND created_at >= ?1");
+    }
+    sql.push_str(" GROUP BY chain_id) f ON f.chain_id = c.id LEFT JOIN (SELECT chain_id, SUM(CASE WHEN result = 'fulfilled' THEN 1 ELSE 0 END) AS fulfilled, SUM(CASE WHEN result = 'failed_reset' THEN 1 ELSE 0 END) AS failed_reset, SUM(CASE WHEN result = 'failed_precedent' THEN 1 ELSE 0 END) AS failed_precedent FROM reservation_sessions WHERE 1=1");
+
+    if since_filter.is_some() {
+        sql.push_str(" AND created_at >= ?2");
+    }
+    sql.push_str(" GROUP BY chain_id) r ON r.chain_id = c.id ORDER BY c.created_at DESC");
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+    let rows: Vec<serde_json::Value> = if let Some(ref s) = since_filter {
+        stmt.query_map(rusqlite::params![s, s], |row| {
+            Ok(serde_json::json!({
+                "chain_id": row.get::<_, i64>(0)?,
+                "chain_name": row.get::<_, String>(1)?,
+                "status": row.get::<_, String>(2)?,
+                "current_length": row.get::<_, i64>(3)?,
+                "best_length": row.get::<_, i64>(4)?,
+                "auxiliary_current_length": row.get::<_, i64>(5)?,
+                "auxiliary_best_length": row.get::<_, i64>(6)?,
+                "completed_count": row.get::<_, i64>(7)?,
+                "failed_reset_count": row.get::<_, i64>(8)?,
+                "failed_precedent_count": row.get::<_, i64>(9)?,
+                "reservation_fulfilled_count": row.get::<_, i64>(10)?,
+                "reservation_failed_reset_count": row.get::<_, i64>(11)?,
+                "reservation_failed_precedent_count": row.get::<_, i64>(12)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect()
+    } else {
+        stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "chain_id": row.get::<_, i64>(0)?,
+                "chain_name": row.get::<_, String>(1)?,
+                "status": row.get::<_, String>(2)?,
+                "current_length": row.get::<_, i64>(3)?,
+                "best_length": row.get::<_, i64>(4)?,
+                "auxiliary_current_length": row.get::<_, i64>(5)?,
+                "auxiliary_best_length": row.get::<_, i64>(6)?,
+                "completed_count": row.get::<_, i64>(7)?,
+                "failed_reset_count": row.get::<_, i64>(8)?,
+                "failed_precedent_count": row.get::<_, i64>(9)?,
+                "reservation_fulfilled_count": row.get::<_, i64>(10)?,
+                "reservation_failed_reset_count": row.get::<_, i64>(11)?,
+                "reservation_failed_precedent_count": row.get::<_, i64>(12)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    Ok(rows)
+}
+
+#[tauri::command]
+fn get_failure_debug_summary(
+    state: tauri::State<'_, Database>,
+    since: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let since_filter = since
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    // Aggregate counts by debug_category
+    let mut sql = String::from(
+        "SELECT COALESCE(debug_category, '未分类') AS category, COUNT(*) AS cnt FROM (SELECT debug_category FROM focus_sessions WHERE debug_category IS NOT NULL AND (result = 'failed_reset' OR result = 'failed_precedent')",
+    );
+
+    if since_filter.is_some() {
+        sql.push_str(" AND created_at >= ?1");
+    }
+    sql.push_str(" UNION ALL SELECT debug_category FROM reservation_sessions WHERE debug_category IS NOT NULL AND (result = 'failed_reset' OR result = 'failed_precedent')");
+    if since_filter.is_some() {
+        sql.push_str(" AND created_at >= ?2");
+    }
+    sql.push_str(") GROUP BY category ORDER BY cnt DESC");
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+    let categories: Vec<(String, i64)> = if let Some(ref s) = since_filter {
+        stmt.query_map(rusqlite::params![s, s], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect()
+    } else {
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    // Fetch per-category detail: recent notes, last occurred time, and involved chain names
+    let mut results = Vec::new();
+    for (category, count) in categories {
+        // Recent notes (up to 5)
+        let mut notes_sql = String::from(
+            "SELECT note FROM (SELECT debug_note AS note, created_at FROM focus_sessions WHERE debug_category = ?1 AND debug_note IS NOT NULL AND debug_note != '' AND (result = 'failed_reset' OR result = 'failed_precedent')",
+        );
+        if since_filter.is_some() {
+            notes_sql.push_str(" AND created_at >= ?3");
+        }
+        notes_sql.push_str(" UNION ALL SELECT debug_note, created_at FROM reservation_sessions WHERE debug_category = ?2 AND debug_note IS NOT NULL AND debug_note != '' AND (result = 'failed_reset' OR result = 'failed_precedent')");
+        if since_filter.is_some() {
+            notes_sql.push_str(" AND created_at >= ?4");
+        }
+        notes_sql.push_str(") ORDER BY created_at DESC LIMIT 5");
+
+        let mut notes_stmt = conn.prepare(&notes_sql).map_err(|e| e.to_string())?;
+        let notes: Vec<String> = if let Some(ref s) = since_filter {
+            notes_stmt
+                .query_map(rusqlite::params![category, category, s, s], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            notes_stmt
+                .query_map(rusqlite::params![category, category], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        // Last occurred time (most recent created_at across both session types)
+        let mut last_sql = String::from(
+            "SELECT MAX(created_at) FROM (SELECT created_at FROM focus_sessions WHERE debug_category = ?1 AND (result = 'failed_reset' OR result = 'failed_precedent')",
+        );
+        if since_filter.is_some() {
+            last_sql.push_str(" AND created_at >= ?3");
+        }
+        last_sql.push_str(" UNION ALL SELECT created_at FROM reservation_sessions WHERE debug_category = ?2 AND (result = 'failed_reset' OR result = 'failed_precedent')");
+        if since_filter.is_some() {
+            last_sql.push_str(" AND created_at >= ?4");
+        }
+        last_sql.push_str(")");
+
+        let mut last_stmt = conn.prepare(&last_sql).map_err(|e| e.to_string())?;
+        let last_occurred_at: Option<String> = if let Some(ref s) = since_filter {
+            last_stmt
+                .query_row(rusqlite::params![category, category, s, s], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .ok()
+                .flatten()
+        } else {
+            last_stmt
+                .query_row(rusqlite::params![category, category], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .ok()
+                .flatten()
+        };
+
+        // Distinct chain names involved
+        let mut chains_sql = String::from(
+            "SELECT DISTINCT c.name FROM focus_sessions f JOIN chains c ON c.id = f.chain_id WHERE f.debug_category = ?1 AND (f.result = 'failed_reset' OR f.result = 'failed_precedent')",
+        );
+        if since_filter.is_some() {
+            chains_sql.push_str(" AND f.created_at >= ?3");
+        }
+        chains_sql.push_str(" UNION SELECT DISTINCT c.name FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id WHERE r.debug_category = ?2 AND (r.result = 'failed_reset' OR r.result = 'failed_precedent')");
+        if since_filter.is_some() {
+            chains_sql.push_str(" AND r.created_at >= ?4");
+        }
+
+        let mut chains_stmt = conn.prepare(&chains_sql).map_err(|e| e.to_string())?;
+        let chain_names: Vec<String> = if let Some(ref s) = since_filter {
+            chains_stmt
+                .query_map(rusqlite::params![category, category, s, s], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            chains_stmt
+                .query_map(rusqlite::params![category, category], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        results.push(serde_json::json!({
+            "category": category,
+            "count": count,
+            "recent_notes": notes,
+            "last_occurred_at": last_occurred_at,
+            "chain_names": chain_names,
+        }));
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+fn get_precedent_review_list(
+    state: tauri::State<'_, Database>,
+    since: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let since_filter = since
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let mut sql = String::from(
+        "SELECT p.id, p.chain_id, c.name AS chain_name, p.scope, p.title, p.description, p.created_from_session_id, p.created_from_session_type, p.status, p.created_at, p.updated_at, p.retired_at FROM precedents p JOIN chains c ON c.id = p.chain_id WHERE 1=1",
+    );
+
+    if since_filter.is_some() {
+        sql.push_str(" AND p.created_at >= ?1");
+    }
+    sql.push_str(" ORDER BY p.created_at DESC");
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+    let rows: Vec<serde_json::Value> = if let Some(ref s) = since_filter {
+        stmt.query_map([s], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "chain_id": row.get::<_, i64>(1)?,
+                "chain_name": row.get::<_, String>(2)?,
+                "scope": row.get::<_, String>(3)?,
+                "title": row.get::<_, String>(4)?,
+                "description": row.get::<_, String>(5)?,
+                "created_from_session_id": row.get::<_, Option<i64>>(6)?,
+                "created_from_session_type": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+                "created_at": row.get::<_, String>(9)?,
+                "updated_at": row.get::<_, Option<String>>(10)?,
+                "retired_at": row.get::<_, Option<String>>(11)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect()
+    } else {
+        stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "chain_id": row.get::<_, i64>(1)?,
+                "chain_name": row.get::<_, String>(2)?,
+                "scope": row.get::<_, String>(3)?,
+                "title": row.get::<_, String>(4)?,
+                "description": row.get::<_, String>(5)?,
+                "created_from_session_id": row.get::<_, Option<i64>>(6)?,
+                "created_from_session_type": row.get::<_, Option<String>>(7)?,
+                "status": row.get::<_, String>(8)?,
+                "created_at": row.get::<_, String>(9)?,
+                "updated_at": row.get::<_, Option<String>>(10)?,
+                "retired_at": row.get::<_, Option<String>>(11)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    Ok(rows)
+}
+
+#[tauri::command]
 fn get_protocol_timeline(
     state: tauri::State<'_, Database>,
     type_filter: Option<String>,
@@ -2465,6 +2778,9 @@ pub fn run() {
             reset_history_and_progress,
             get_db_version,
             save_export_file,
+            get_chain_review_stats,
+            get_failure_debug_summary,
+            get_precedent_review_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
