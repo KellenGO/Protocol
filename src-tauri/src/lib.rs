@@ -1,6 +1,9 @@
 mod db;
 
 use db::Database;
+use rusqlite::Connection;
+use std::fs;
+use std::path::Path;
 use tauri::Manager;
 
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
@@ -2052,10 +2055,254 @@ fn get_protocol_timeline(
     Ok(events)
 }
 
+// ===== Data Management Commands =====
+
+fn validate_backup_file(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err("备份文件不存在".into());
+    }
+    let test_conn = Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
+    test_conn
+        .query_row("SELECT COUNT(*) FROM chains", [], |row| row.get::<_, i64>(0))
+        .map_err(|_| "备份文件缺少必要的表结构（chains 表不存在）".to_string())?;
+    test_conn
+        .query_row("SELECT COUNT(*) FROM app_settings", [], |row| row.get::<_, i64>(0))
+        .map_err(|_| "备份文件缺少必要的表结构（app_settings 表不存在）".to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn backup_database(
+    state: tauri::State<'_, Database>,
+    dest_path: String,
+) -> Result<String, String> {
+    let dest = Path::new(&dest_path);
+    if let Some(parent) = dest.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| format!("无法创建目标目录: {}", e))?;
+        }
+    }
+    let _lock = state.conn.lock().map_err(|e| e.to_string())?;
+    fs::copy(&state.db_path, dest).map_err(|e| format!("备份失败: {}", e))?;
+    Ok(dest_path)
+}
+
+#[tauri::command]
+fn restore_database(
+    state: tauri::State<'_, Database>,
+    backup_path: String,
+) -> Result<String, String> {
+    let backup = Path::new(&backup_path);
+    validate_backup_file(backup)?;
+
+    // Safety backup before restore
+    let safety_dir = state
+        .db_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(".backup");
+    fs::create_dir_all(&safety_dir).map_err(|e| format!("无法创建安全备份目录: {}", e))?;
+    let timestamp = chrono::Local::now().format("%Y-%m-%d-%H%M");
+    let safety_path = safety_dir.join(format!("pre-restore-{}.sqlite", timestamp));
+    fs::copy(&state.db_path, &safety_path)
+        .map_err(|e| format!("无法创建恢复前安全备份: {}", e))?;
+
+    // Release the database connection lock before replacing the file
+    {
+        let _guard = state.conn.lock().map_err(|e| e.to_string())?;
+        // guard dropped immediately
+    }
+
+    // Replace database file
+    fs::copy(backup, &state.db_path).map_err(|e| format!("恢复失败: {}", e))?;
+
+    Ok(format!(
+        "数据已恢复。请重启应用以加载恢复的数据。\n恢复前安全备份: {}",
+        safety_path.display()
+    ))
+}
+
+#[tauri::command]
+fn get_database_info(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let file_size_bytes = fs::metadata(&state.db_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    let chain_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM chains", [], |row| row.get(0))
+        .unwrap_or(0);
+    let focus_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM focus_sessions", [], |row| row.get(0))
+        .unwrap_or(0);
+    let reservation_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM reservation_sessions", [], |row| row.get(0))
+        .unwrap_or(0);
+    let precedent_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM precedents", [], |row| row.get(0))
+        .unwrap_or(0);
+    let formula_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM rsip_formulas", [], |row| row.get(0))
+        .unwrap_or(0);
+    let event_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM formula_events", [], |row| row.get(0))
+        .unwrap_or(0);
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "db_path": state.db_path.to_string_lossy(),
+        "file_size_bytes": file_size_bytes,
+        "version": version,
+        "tables": {
+            "chains": chain_count,
+            "focus_sessions": focus_count,
+            "reservation_sessions": reservation_count,
+            "precedents": precedent_count,
+            "rsip_formulas": formula_count,
+            "formula_events": event_count
+        }
+    }))
+}
+
+#[tauri::command]
+fn export_history_json(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let export_table = |sql: &str| -> Result<Vec<serde_json::Value>, String> {
+        let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+        let column_names: Vec<String> = stmt
+            .column_names()
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        let rows = stmt
+            .query_map([], |row| {
+                let mut obj = serde_json::Map::new();
+                for (i, col) in column_names.iter().enumerate() {
+                    let val: rusqlite::Result<String> = row.get(i);
+                    obj.insert(
+                        col.clone(),
+                        serde_json::Value::String(val.unwrap_or_default()),
+                    );
+                }
+                Ok(serde_json::Value::Object(obj))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(result)
+    };
+
+    let focus_sessions = export_table(
+        "SELECT id, chain_id, started_at, expected_end_at, ended_at, duration_minutes, result, failure_note, trigger_action, completion_condition, debug_category, debug_note, created_at FROM focus_sessions ORDER BY id",
+    )?;
+    let reservation_sessions = export_table(
+        "SELECT id, chain_id, created_at, due_at, confirmation_due_at, fulfilled_at, result, failure_note, trigger_action, completion_condition, debug_category, debug_note FROM reservation_sessions ORDER BY id",
+    )?;
+    let precedents = export_table(
+        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents ORDER BY id",
+    )?;
+    let formula_events = export_table(
+        "SELECT id, formula_id, event_type, note, created_at FROM formula_events ORDER BY id",
+    )?;
+    let chains = export_table(
+        "SELECT id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at FROM chains ORDER BY id",
+    )?;
+
+    Ok(serde_json::json!({
+        "exported_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        "tables": {
+            "chains": chains,
+            "focus_sessions": focus_sessions,
+            "reservation_sessions": reservation_sessions,
+            "precedents": precedents,
+            "formula_events": formula_events
+        }
+    }))
+}
+
+#[tauri::command]
+fn clean_test_data(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let before = conn
+        .query_row("SELECT COUNT(*) FROM focus_sessions", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0)
+        + conn
+            .query_row("SELECT COUNT(*) FROM reservation_sessions", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_or(0)
+        + conn
+            .query_row("SELECT COUNT(*) FROM formula_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_or(0);
+
+    conn.execute("DELETE FROM focus_sessions", [])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM reservation_sessions", [])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM formula_events", [])
+        .map_err(|e| e.to_string())?;
+
+    // Reset chain counters
+    conn.execute(
+        "UPDATE chains SET current_length = 0, best_length = 0, auxiliary_current_length = 0, auxiliary_best_length = 0, updated_at = datetime('now')",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let remaining_chains: i64 = conn
+        .query_row("SELECT COUNT(*) FROM chains", [], |row| row.get(0))
+        .unwrap_or(0);
+    let remaining_precedents: i64 = conn
+        .query_row("SELECT COUNT(*) FROM precedents", [], |row| row.get(0))
+        .unwrap_or(0);
+    let remaining_formulas: i64 = conn
+        .query_row("SELECT COUNT(*) FROM rsip_formulas", [], |row| row.get(0))
+        .unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "deleted_records": before,
+        "remaining": {
+            "chains": remaining_chains,
+            "precedents": remaining_precedents,
+            "rsip_formulas": remaining_formulas
+        }
+    }))
+}
+
+#[tauri::command]
+fn get_db_version(state: tauri::State<'_, Database>) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_export_file(path: String, content: String) -> Result<String, String> {
+    let dest = Path::new(&path);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("无法创建目录: {}", e))?;
+    }
+    fs::write(dest, &content).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_dir = app
                 .path()
@@ -2103,6 +2350,13 @@ pub fn run() {
             get_protocol_timeline,
             get_app_settings,
             update_app_setting,
+            backup_database,
+            restore_database,
+            get_database_info,
+            export_history_json,
+            clean_test_data,
+            get_db_version,
+            save_export_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

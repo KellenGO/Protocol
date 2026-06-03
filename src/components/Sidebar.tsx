@@ -5,6 +5,7 @@ const navItems = [
   { to: '/chains', label: '主链', icon: 'C' },
   { to: '/history', label: '历史记录', icon: 'H' },
   { to: '/rsip', label: 'RSIP', icon: 'R' },
+  { to: '/data-management', label: '数据管理', icon: 'M' },
   { to: '/settings', label: '设置', icon: 'S' },
 ];
 

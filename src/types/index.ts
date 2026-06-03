@@ -229,3 +229,39 @@ export interface AppSetting {
   key: string;
   value: string;
 }
+
+// ===== Data Management =====
+
+export interface DatabaseInfo {
+  db_path: string;
+  file_size_bytes: number;
+  version: number;
+  tables: {
+    chains: number;
+    focus_sessions: number;
+    reservation_sessions: number;
+    precedents: number;
+    rsip_formulas: number;
+    formula_events: number;
+  };
+}
+
+export interface HistoryExport {
+  exported_at: string;
+  tables: {
+    chains: Record<string, string>[];
+    focus_sessions: Record<string, string>[];
+    reservation_sessions: Record<string, string>[];
+    precedents: Record<string, string>[];
+    formula_events: Record<string, string>[];
+  };
+}
+
+export interface CleanTestDataResult {
+  deleted_records: number;
+  remaining: {
+    chains: number;
+    precedents: number;
+    rsip_formulas: number;
+  };
+}

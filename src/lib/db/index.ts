@@ -5,8 +5,10 @@ import type {
   AppSetting,
   Chain,
   ChainPrecedent,
+  CleanTestDataResult,
   CompleteFocusResult,
   DashboardSummary,
+  DatabaseInfo,
   FailResetResult,
   FailPrecedentResult,
   FailReservationPrecedentResult,
@@ -16,6 +18,7 @@ import type {
   GlobalActiveReservationSession,
   FormulaEvent,
   FormulaReview,
+  HistoryExport,
   ProtocolEvent,
   ProtocolPrecedent,
   ProtocolTimelineEvent,
@@ -287,4 +290,30 @@ export async function getRsipSummary(): Promise<RsipSummary> {
 
 export async function getRsipFormulaReview(id: number): Promise<FormulaReview> {
   return invoke('get_rsip_formula_review', { id });
+}
+
+// ===== Data Management =====
+
+export async function backupDatabase(destPath: string): Promise<string> {
+  return invoke('backup_database', { destPath });
+}
+
+export async function restoreDatabase(backupPath: string): Promise<string> {
+  return invoke('restore_database', { backupPath });
+}
+
+export async function getDatabaseInfo(): Promise<DatabaseInfo> {
+  return invoke('get_database_info');
+}
+
+export async function exportHistoryJson(): Promise<HistoryExport> {
+  return invoke('export_history_json');
+}
+
+export async function cleanTestData(): Promise<CleanTestDataResult> {
+  return invoke('clean_test_data');
+}
+
+export async function getDbVersion(): Promise<number> {
+  return invoke('get_db_version');
 }

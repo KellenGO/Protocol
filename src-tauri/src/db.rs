@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
+    pub db_path: PathBuf,
 }
 
 impl Database {
@@ -12,13 +13,14 @@ impl Database {
         fs::create_dir_all(&app_dir).expect("failed to create app data dir");
 
         let db_path = app_dir.join("protocol.db");
-        let conn = Connection::open(db_path)?;
+        let conn = Connection::open(&db_path)?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
         let db = Database {
             conn: Mutex::new(conn),
+            db_path,
         };
         db.initialize_schema()?;
         Ok(db)
@@ -133,6 +135,13 @@ impl Database {
 
         migrate_precedents_to_core_schema(&conn)?;
         migrate_protocol_config_schema(&conn)?;
+
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap_or(0);
+        if version == 0 {
+            conn.pragma_update(None, "user_version", 1)?;
+        }
 
         Ok(())
     }
