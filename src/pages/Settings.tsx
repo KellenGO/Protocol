@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getAppSettings, updateAppSetting } from '../lib/db';
 import type { AppSetting } from '../types';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 
 function getValue(settings: AppSetting[], key: string): string {
   return settings.find((s) => s.key === key)?.value ?? '';
@@ -11,6 +12,10 @@ export default function Settings() {
   const [focusDur, setFocusDur] = useState('');
   const [reservationDur, setReservationDur] = useState('');
   const [confirmationDur, setConfirmationDur] = useState('');
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+  const [notifyPermissionDenied, setNotifyPermissionDenied] = useState(false);
+  const [notifySaving, setNotifySaving] = useState(false);
+  const [testNotifyResult, setTestNotifyResult] = useState<string | null>(null);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
 
@@ -20,6 +25,7 @@ export default function Settings() {
         setFocusDur(getValue(s, 'default_focus_duration'));
         setReservationDur(getValue(s, 'default_reservation_duration'));
         setConfirmationDur(getValue(s, 'auxiliary_confirmation_window_minutes') || '3');
+        setNotifyEnabled(getValue(s, 'enable_notifications') === '1');
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
@@ -39,6 +45,56 @@ export default function Settings() {
       setError(String(err));
     } finally {
       setSaving((prev) => ({ ...prev, [key]: false }));
+    }
+  }
+
+  async function handleNotifyToggle() {
+    setError('');
+    setNotifyPermissionDenied(false);
+    setTestNotifyResult(null);
+    const newValue = !notifyEnabled;
+
+    if (newValue) {
+      try {
+        const granted = await isPermissionGranted();
+        if (!granted) {
+          const perm = await requestPermission();
+          if (perm !== 'granted') {
+            setNotifyPermissionDenied(true);
+            return;
+          }
+        }
+      } catch {
+        setError('系统通知权限未授予，请在系统设置中允许 Protocol 通知。');
+        return;
+      }
+    }
+
+    setNotifySaving(true);
+    try {
+      await updateAppSetting('enable_notifications', newValue ? '1' : '0');
+      setNotifyEnabled(newValue);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setNotifySaving(false);
+    }
+  }
+
+  async function handleTestNotification() {
+    setTestNotifyResult(null);
+    setError('');
+
+    try {
+      const granted = await isPermissionGranted();
+      if (!granted) {
+        setTestNotifyResult('denied');
+        return;
+      }
+      sendNotification({ title: 'Protocol', body: 'Protocol 通知已启用' });
+      setTestNotifyResult('sent');
+    } catch {
+      setTestNotifyResult('error');
     }
   }
 
@@ -136,9 +192,50 @@ export default function Settings() {
         <div className="settings-item">
           <div className="settings-item-info">
             <span className="settings-item-label">桌面通知</span>
-            <span className="settings-item-hint">后续版本支持</span>
+            <span className="settings-item-hint">
+              {notifyPermissionDenied
+                ? '系统通知权限未授予，请在系统设置中允许 Protocol 通知。'
+                : notifyEnabled
+                  ? '专注和辅助链到期时会发送桌面通知'
+                  : '开启后在协议到期时接收桌面通知'}
+            </span>
+            {testNotifyResult === 'sent' && (
+              <span className="settings-item-hint" style={{ color: 'var(--success)' }}>
+                测试通知已发送，请检查系统通知中心。
+              </span>
+            )}
+            {testNotifyResult === 'denied' && (
+              <span className="settings-item-hint" style={{ color: 'var(--danger)' }}>
+                系统通知权限未授予，请在系统设置中允许 Protocol 通知。
+              </span>
+            )}
+            {testNotifyResult === 'error' && (
+              <span className="settings-item-hint" style={{ color: 'var(--danger)' }}>
+                发送测试通知失败，请检查系统通知设置。
+              </span>
+            )}
           </div>
-          <span className="settings-value-muted">-</span>
+          <div className="settings-item-control">
+            {notifyEnabled && (
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: 12, padding: '5px 12px', marginRight: 8 }}
+                onClick={handleTestNotification}
+                type="button"
+              >
+                测试通知
+              </button>
+            )}
+            <button
+              className={`toggle-switch ${notifyEnabled ? 'toggle-on' : ''}`}
+              onClick={handleNotifyToggle}
+              disabled={notifySaving}
+              type="button"
+              aria-label={notifyEnabled ? '关闭通知' : '开启通知'}
+            >
+              <span className="toggle-knob" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -2,6 +2,8 @@ mod db;
 
 use db::Database;
 use tauri::Manager;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::TrayIconBuilder;
 
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
@@ -2056,6 +2058,7 @@ fn get_protocol_timeline(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_dir = app
                 .path()
@@ -2064,6 +2067,27 @@ pub fn run() {
 
             let database = Database::new(app_dir).expect("failed to initialize database");
             app.manage(database);
+
+            // --- System tray ---
+            // 只保留"打开 Protocol"。
+            // 不提供"退出"菜单项，因为 app.exit(0) 会绕过前端的 active-flow 关闭确认。
+            // 用户应通过窗口关闭按钮正常退出，以触发 main.tsx 中的确认逻辑。
+            let open_item = MenuItemBuilder::with_id("open", "打开 Protocol").build(app)?;
+            let tray_menu = MenuBuilder::new(app).item(&open_item).build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().unwrap())
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| {
+                    if event.id() == "open" {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

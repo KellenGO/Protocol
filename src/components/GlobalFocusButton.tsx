@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getGlobalActiveFocusSession, getGlobalActiveReservationSession } from '../lib/db';
+import { getGlobalActiveFocusSession, getGlobalActiveReservationSession, getAppSettings } from '../lib/db';
+import { isPermissionGranted, sendNotification } from '@tauri-apps/plugin-notification';
 import type { GlobalActiveFocusSession, GlobalActiveReservationSession } from '../types';
 
 type GlobalActiveState =
@@ -8,12 +9,32 @@ type GlobalActiveState =
   | { kind: 'reservation'; data: GlobalActiveReservationSession }
   | null;
 
+/*
+ * 防重复通知策略：
+ * - `notifiedRef` 记录 "focus-{id}" 或 "reservation-{id}" 键
+ * - 同一 session，只要 ref 已匹配就不再发送系统通知
+ * - 同一 session 的 toast 也由 `toastedSessionRef` 独立防重复
+ * - due/pending 状态消失时（用户完成/裁决），清空 ref
+ * - 应用重启后 ref 自然清空，因此重启后若仍处于 due/pending 状态，会再通知一次
+ */
+async function shouldSendNotification(): Promise<boolean> {
+  try {
+    const settings = await getAppSettings();
+    const enabled = settings.find((s) => s.key === 'enable_notifications')?.value;
+    if (enabled !== '1') return false;
+    return await isPermissionGranted();
+  } catch {
+    return false;
+  }
+}
+
 export default function GlobalFocusButton() {
   const navigate = useNavigate();
   const [active, setActive] = useState<GlobalActiveState>(null);
   const [isDue, setIsDue] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const toastedSessionRef = useRef<string | null>(null);
+  const notifiedRef = useRef<string | null>(null);
 
   useEffect(() => {
     function check() {
@@ -26,6 +47,7 @@ export default function GlobalFocusButton() {
               setIsDue(false);
               setShowToast(false);
               toastedSessionRef.current = null;
+              notifiedRef.current = null;
               return;
             }
 
@@ -41,14 +63,26 @@ export default function GlobalFocusButton() {
                 setTimeout(() => setShowToast(false), 4000);
               }
 
-              if (!due) toastedSessionRef.current = null;
+              if (due && notifiedRef.current !== toastKey) {
+                shouldSendNotification().then((ok) => {
+                  if (ok) {
+                    notifiedRef.current = toastKey;
+                    sendNotification({ title: 'Protocol', body: '专注时间已到，请确认完成任务' });
+                  }
+                });
+              }
+
+              if (!due) {
+                toastedSessionRef.current = null;
+                notifiedRef.current = null;
+              }
             }
             return;
           }
 
           if (reservation) {
             setActive({ kind: 'reservation', data: reservation });
-            const confirming = reservation.phase === 'confirming';
+            const confirming = reservation.phase === 'confirming' || reservation.pending_ruling;
             setIsDue(confirming);
             const toastKey = `reservation-${reservation.id}`;
             if (confirming && toastedSessionRef.current !== toastKey) {
@@ -56,9 +90,20 @@ export default function GlobalFocusButton() {
               setShowToast(true);
               setTimeout(() => setShowToast(false), 4000);
             }
+
+            if (confirming && notifiedRef.current !== toastKey) {
+              shouldSendNotification().then((ok) => {
+                if (ok) {
+                  notifiedRef.current = toastKey;
+                  sendNotification({ title: 'Protocol', body: '辅助链已到期，请履约或进入裁决' });
+                }
+              });
+            }
+
             if (!confirming) {
               setShowToast(false);
               toastedSessionRef.current = null;
+              notifiedRef.current = null;
             }
             return;
           }
@@ -67,6 +112,7 @@ export default function GlobalFocusButton() {
           setIsDue(false);
           setShowToast(false);
           toastedSessionRef.current = null;
+          notifiedRef.current = null;
         })
         .catch(() => {});
     }
