@@ -89,7 +89,10 @@ impl Database {
                 description TEXT NOT NULL DEFAULT '',
                 created_from_session_id INTEGER,
                 created_from_session_type TEXT CHECK(created_from_session_type IN ('focus', 'reservation')),
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'retired')),
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT,
+                retired_at TEXT,
                 FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
             );
 
@@ -207,6 +210,15 @@ fn migrate_protocol_config_schema(conn: &Connection) -> SqliteResult<()> {
 
     add_column_if_missing(conn, "reservation_sessions", "confirmation_due_at", "TEXT")?;
 
+    add_column_if_missing(
+        conn,
+        "precedents",
+        "status",
+        "TEXT NOT NULL DEFAULT 'active'",
+    )?;
+    add_column_if_missing(conn, "precedents", "updated_at", "TEXT")?;
+    add_column_if_missing(conn, "precedents", "retired_at", "TEXT")?;
+
     for table in ["focus_sessions", "reservation_sessions"] {
         add_column_if_missing(conn, table, "trigger_action", "TEXT NOT NULL DEFAULT ''")?;
         add_column_if_missing(
@@ -253,7 +265,10 @@ fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
             description TEXT NOT NULL DEFAULT '',
             created_from_session_id INTEGER,
             created_from_session_type TEXT CHECK(created_from_session_type IN ('focus', 'reservation')),
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'retired')),
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT,
+            retired_at TEXT,
             FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
         );
         INSERT INTO precedents (
@@ -264,6 +279,7 @@ fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
             description,
             created_from_session_id,
             created_from_session_type,
+            status,
             created_at
         )
         SELECT
@@ -274,6 +290,7 @@ fn migrate_precedents_to_core_schema(conn: &Connection) -> SqliteResult<()> {
             description,
             created_from_session_id,
             created_from_session_type,
+            'active',
             created_at
         FROM precedents_v2beta_legacy;
         DROP TABLE precedents_v2beta_legacy;

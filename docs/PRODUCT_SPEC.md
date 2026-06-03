@@ -12,12 +12,14 @@
 
 ### 当前版本状态
 
-Protocol 已经进入 **V2 Alpha**。
+Protocol 已经进入 **V2 Gamma 之后的闭环成熟化阶段**。
 
 - **CTDP V1 已完成**：主链、预约启动、正式任务、失败裁决、判例化、Dashboard、History、Settings 已形成可日常使用的最小闭环。
 - **RSIP 定式树已进入 Alpha**：定式节点、父子结构、点亮 / 熄灭、递归回滚、事件日志已接入应用。
 - **Dashboard 与 History 已接入 RSIP**：首页展示 RSIP 摘要，历史页展示 CTDP + RSIP 的统一协议时间线。
-- **下一阶段是 V2 Beta**：重点强化判例与裁决系统，而不是回到 V1 计划或重新搭建基础工程。
+- **V2 Beta 已完成**：重点强化轻量裁决、判例边界和协议历史。
+- **V2 Gamma 已完成**：辅助链独立长度、第二预约信号和 RSIP 单定式复盘已接入。
+- **当前阶段**：补全辅助链裁决闭环，把判例库做成可查看、可编辑、可废止的第一版管理系统，并补上 RSIP 单定式维护第一版。
 
 ---
 
@@ -102,10 +104,12 @@ Protocol 长期可分为两个大模块：
 - 用户每天都能使用
 - 其核心流程更适合先验证产品形态
 
-当前阶段已经切换到 **V2 Alpha / V2 Beta**：
+当前阶段已经切换到 **V2 Gamma 之后的闭环成熟化**：
 
 - V2 Alpha 已接入 RSIP 定式树，让 Protocol 从单次任务协议扩展到长期稳态协议。
 - V2 Beta 的优先方向是强化“判例与裁决系统”，让 CTDP 判例、预约判例、RSIP 熄灭 / 回滚事件都能被更清晰地记录、复盘与再次使用。
+- V2 Gamma 已强化辅助链连续性、确认窗口和 RSIP 单定式复盘。
+- 当前优先方向是辅助链裁决闭环、判例库成熟化第一版和 RSIP 单定式维护第一版。
 - 后续开发不再以 `archive/V1_IMPLEMENTATION_PLAN.md` 作为当前优先依据；该文档仅保留历史信息。
 
 ---
@@ -372,11 +376,14 @@ V2 Beta 不以新增大模块为主，而是强化“裁决之后如何被保存
 - **国策树**：定式之间的依赖结构
 # Protocol Product Spec - Current Master Note
 
-Current status: Protocol has entered V2 Alpha and this worktree is implementing V2 Beta. CTDP V1 has passed as the usable minimum loop; V2 Alpha connected the RSIP formula tree to Dashboard and History; V2 Beta strengthens the "every dispute becomes a ruling" mechanism by making failure rulings, precedent creation, protocol boundaries, and History review more formal.
+Current status: Protocol is past V2 Gamma and is closing the auxiliary-chain adjudication, precedent-library, and RSIP single-formula maintenance loop. CTDP V1 has passed as the usable minimum loop; V2 Alpha connected the RSIP formula tree to Dashboard and History; V2 Beta strengthened lightweight rulings and protocol boundaries; V2 Gamma added auxiliary-chain continuity, the second reservation signal, and single-formula RSIP review.
 
 Current priority:
 - Treat the precedent library as the protocol boundary.
 - Treat focus failure and reservation non-fulfillment as formal rulings, not ordinary cancellation.
-- Keep RSIP as the long-term stable-state module while CTDP Beta focuses on adjudication quality.
+- Let auxiliary-chain confirmation expiry enter pending ruling instead of becoming final failure automatically.
+- Let active precedents be viewed, edited, and retired while preserving historical records.
+- Let RSIP review update formula title/description and store custom deactivation notes.
+- Keep the current product boundary focused on the complete offline desktop version; AI, cloud sync, accounts, mobile apps, and community sharing remain outside the active scope.
 
 Historical content below is preserved for continuity.

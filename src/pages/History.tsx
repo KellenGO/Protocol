@@ -110,11 +110,20 @@ export default function History() {
                 <span className={`event-type-badge event-${e.event_type}`}>{protocolEventTypeLabel(e.event_type)}</span>
                 <div className="history-item-info">
                   {e.event_type === 'rsip' ? (
-                    <button className="history-chain-link" onClick={() => navigate('/rsip')}>
+                    <button
+                      className="history-chain-link"
+                      onClick={() => navigate(`/rsip${e.formula_id ? `?formula=${e.formula_id}` : ''}`)}
+                    >
                       {e.formula_title ?? 'RSIP 定式'}
                     </button>
                   ) : (
-                    <button className="history-chain-link" onClick={() => e.chain_id && navigate(`/chains/${e.chain_id}`)}>
+                    <button
+                      className="history-chain-link"
+                      onClick={() => {
+                        if (!e.chain_id) return;
+                        navigate(`/chains/${e.chain_id}${e.precedent_id ? `?precedent=${e.precedent_id}` : ''}`);
+                      }}
+                    >
                       {e.chain_name}
                     </button>
                   )}

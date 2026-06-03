@@ -89,7 +89,7 @@ export default function GlobalFocusButton() {
       {showToast && (
         <div className="global-toast">
           {active.kind === 'reservation'
-            ? '辅助链进入确认窗口，请进入主链或等待自动失败'
+            ? '辅助链进入确认窗口，请进入主链或准备裁决'
             : '神圣座位时间已到，请确认主链完成'}
         </div>
       )}

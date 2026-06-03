@@ -41,7 +41,10 @@ interface Precedent {
   description: string;
   created_from_session_id: number | null;
   created_from_session_type: 'focus' | 'reservation' | null;
+  status: 'active' | 'retired';
   created_at: string;
+  updated_at: string | null;
+  retired_at: string | null;
 }
 
 export interface ActiveFocusSession {
@@ -77,8 +80,15 @@ export type ChainPrecedent = Pick<
   | 'scope'
   | 'title'
   | 'description'
+  | 'created_from_session_id'
+  | 'created_from_session_type'
+  | 'status'
   | 'created_at'
+  | 'updated_at'
+  | 'retired_at'
 >;
+
+export type ProtocolPrecedent = Precedent;
 
 export interface ActiveReservationSession {
   id: number;
@@ -122,6 +132,12 @@ export interface FailReservationResetResult {
     debug_note: string | null;
   };
   chain: Chain;
+}
+
+export interface FailReservationPrecedentResult {
+  session: FailReservationResetResult['session'];
+  chain: Chain;
+  precedent: ProtocolPrecedent;
 }
 
 export interface DashboardSummary {

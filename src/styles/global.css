@@ -1224,6 +1224,19 @@ body {
   padding: 14px 18px;
 }
 
+.precedent-button {
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.precedent-button:hover {
+  border-color: var(--text-muted);
+  transform: translateY(-1px);
+}
+
 .precedent-item-header {
   display: flex;
   justify-content: space-between;
@@ -1249,6 +1262,42 @@ body {
   color: var(--text-secondary);
   margin-top: 6px;
   line-height: 1.5;
+}
+
+.precedent-detail-panel {
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.precedent-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.precedent-detail-header h3 {
+  margin-top: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.precedent-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.precedent-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 /* ===== Reservation ===== */
@@ -1735,6 +1784,17 @@ body {
   margin-bottom: 14px;
 }
 
+.rsip-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
 .rsip-review-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -1780,6 +1840,10 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.5;
+}
+
+.rsip-deactivation-note {
+  margin-bottom: 14px;
 }
 
 .compact-events {

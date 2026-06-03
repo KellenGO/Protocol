@@ -1,25 +1,49 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   expireReservationSession,
+  failReservationSessionPrecedent,
+  failReservationSessionReset,
   fulfillReservationAndStartFocus,
   getChain,
   getChainPrecedents,
   getChainReservationPrecedents,
   getGlobalActiveFocusSession,
   getGlobalActiveReservationSession,
+  getPrecedent,
+  retirePrecedent,
   startFocusSession,
   startReservationSession,
+  updatePrecedent,
 } from '../lib/db';
 import EditChainForm from '../features/ctdp/EditChainForm';
+import { FAILURE_DEBUG_CATEGORIES } from '../features/ctdp/protocolOptions';
 import type {
   ActiveReservationSession,
   Chain,
   ChainPrecedent,
+  FailReservationPrecedentResult,
   FailReservationResetResult,
+  ProtocolPrecedent,
 } from '../types';
 
-type AuxiliaryPhase = 'idle' | 'countdown' | 'confirming' | 'expired';
+type AuxiliaryPhase = 'idle' | 'countdown' | 'confirming' | 'ruling' | 'expired';
+
+type AuxiliaryDoneResult =
+  | { kind: 'failed_reset'; data: FailReservationResetResult }
+  | { kind: 'failed_precedent'; data: FailReservationPrecedentResult };
+
+const behaviorTypes = [
+  '通讯 / 消息打断',
+  '手机 / 娱乐诱惑',
+  '外部事件',
+  '生理需求',
+  '环境变化',
+  '任务定义不清',
+  '身体状态不佳',
+  '紧急情况',
+  '其他',
+];
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -39,12 +63,32 @@ function reservationTargetTime(reservation: ActiveReservationSession): number {
 }
 
 function auxiliaryPhaseFromReservation(reservation: ActiveReservationSession): AuxiliaryPhase {
+  if (reservation.phase === 'pending_ruling') return 'ruling';
   return reservation.phase === 'confirming' ? 'confirming' : 'countdown';
+}
+
+function reservationFromFailure(result: FailReservationResetResult): ActiveReservationSession {
+  return {
+    id: result.session.id,
+    chain_id: result.session.chain_id,
+    created_at: result.session.created_at,
+    due_at: result.session.due_at,
+    confirmation_due_at: result.session.confirmation_due_at,
+    trigger_action: result.session.trigger_action,
+    completion_condition: result.session.completion_condition,
+    phase: 'pending_ruling',
+  };
+}
+
+function resolveBehavior(behaviorType: string, customBehavior: string): string {
+  if (behaviorType === '其他') return customBehavior.trim();
+  return behaviorType;
 }
 
 export default function ChainDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const chainId = Number(id);
 
   const [chain, setChain] = useState<Chain | null>(null);
@@ -59,6 +103,16 @@ export default function ChainDetail() {
   const [reservation, setReservation] = useState<ActiveReservationSession | null>(null);
   const [remaining, setRemaining] = useState(0);
   const [expiredResult, setExpiredResult] = useState<FailReservationResetResult | null>(null);
+  const [auxiliaryDoneResult, setAuxiliaryDoneResult] = useState<AuxiliaryDoneResult | null>(null);
+  const [behaviorType, setBehaviorType] = useState(behaviorTypes[0]);
+  const [customBehavior, setCustomBehavior] = useState('');
+  const [debugCategory, setDebugCategory] = useState(FAILURE_DEBUG_CATEGORIES[0]);
+  const [debugNote, setDebugNote] = useState('');
+  const [rulingError, setRulingError] = useState('');
+  const [selectedPrecedent, setSelectedPrecedent] = useState<ProtocolPrecedent | null>(null);
+  const [precedentTitle, setPrecedentTitle] = useState('');
+  const [precedentDescription, setPrecedentDescription] = useState('');
+  const [precedentWorking, setPrecedentWorking] = useState(false);
   const [error, setError] = useState('');
   const [warnMsg, setWarnMsg] = useState('');
 
@@ -72,8 +126,8 @@ export default function ChainDetail() {
     try {
       const result = await expireReservationSession(reservation.id);
       setExpiredResult(result);
-      setReservation(null);
-      setAuxiliaryPhase('expired');
+      setReservation(reservationFromFailure(result));
+      setAuxiliaryPhase('ruling');
       navigate(`/chains/${chainId}`, { replace: true });
     } catch (err) {
       setError(String(err));
@@ -114,9 +168,9 @@ export default function ChainDetail() {
             const expired = await expireReservationSession(globalReservation.id);
             if (cancelled) return;
             setExpiredResult(expired);
-            setReservation(null);
+            setReservation(reservationFromFailure(expired));
             setRemaining(0);
-            setAuxiliaryPhase('expired');
+            setAuxiliaryPhase('ruling');
             return;
           }
 
@@ -143,6 +197,14 @@ export default function ChainDetail() {
       cancelled = true;
     };
   }, [chainId]);
+
+  useEffect(() => {
+    const precedentId = searchParams.get('precedent');
+    if (!precedentId) return;
+    const id = Number(precedentId);
+    if (!Number.isFinite(id)) return;
+    openPrecedent(id);
+  }, [searchParams]);
 
   useEffect(() => {
     if (auxiliaryPhase !== 'countdown' && auxiliaryPhase !== 'confirming') return;
@@ -176,6 +238,116 @@ export default function ChainDetail() {
     const result = await fulfillReservationAndStartFocus(reservationId);
     setHasActiveFocusOnThisChain(true);
     navigate(`/chains/${result.chain_id}/focus`);
+  }
+
+  async function reloadPrecedents() {
+    const [p, rp] = await Promise.all([
+      getChainPrecedents(chainId),
+      getChainReservationPrecedents(chainId),
+    ]);
+    setPrecedents(p);
+    setReservationPrecedents(rp);
+  }
+
+  function getBehavior(): string | null {
+    const behavior = resolveBehavior(behaviorType, customBehavior);
+    if (!behavior) {
+      setRulingError('请填写自定义争议行为。');
+      return null;
+    }
+    setRulingError('');
+    return behavior;
+  }
+
+  async function handleAuxiliaryResetRuling() {
+    const behavior = getBehavior();
+    if (!reservation || !behavior) return;
+    try {
+      const result = await failReservationSessionReset(
+        reservation.id,
+        behavior,
+        debugCategory,
+        debugNote,
+      );
+      setAuxiliaryDoneResult({ kind: 'failed_reset', data: result });
+      setChain(result.chain);
+      setReservation(null);
+      setAuxiliaryPhase('expired');
+      await reloadPrecedents();
+    } catch (err) {
+      setRulingError(String(err));
+    }
+  }
+
+  async function handleAuxiliaryPrecedentRuling() {
+    const behavior = getBehavior();
+    if (!reservation || !behavior) return;
+    try {
+      const result = await failReservationSessionPrecedent(
+        reservation.id,
+        { title: behavior, description: '' },
+        debugCategory,
+        debugNote,
+      );
+      setAuxiliaryDoneResult({ kind: 'failed_precedent', data: result });
+      setChain(result.chain);
+      setReservation(null);
+      setAuxiliaryPhase('expired');
+      await reloadPrecedents();
+    } catch (err) {
+      setRulingError(String(err));
+    }
+  }
+
+  async function openPrecedent(id: number) {
+    setPrecedentWorking(true);
+    try {
+      const item = await getPrecedent(id);
+      setSelectedPrecedent(item);
+      setPrecedentTitle(item.title);
+      setPrecedentDescription(item.description);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPrecedentWorking(false);
+    }
+  }
+
+  async function handleUpdatePrecedent() {
+    if (!selectedPrecedent) return;
+    setPrecedentWorking(true);
+    try {
+      const updated = await updatePrecedent(selectedPrecedent.id, {
+        title: precedentTitle,
+        description: precedentDescription,
+      });
+      setSelectedPrecedent(updated);
+      setPrecedentTitle(updated.title);
+      setPrecedentDescription(updated.description);
+      await reloadPrecedents();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPrecedentWorking(false);
+    }
+  }
+
+  async function handleRetirePrecedent() {
+    if (!selectedPrecedent) return;
+    const confirmed = window.confirm(
+      '废止后，该判例不再作为活跃协议边界显示，但历史记录仍会保留。确认废止？',
+    );
+    if (!confirmed) return;
+    setPrecedentWorking(true);
+    try {
+      const retired = await retirePrecedent(selectedPrecedent.id);
+      setSelectedPrecedent(retired);
+      await reloadPrecedents();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setPrecedentWorking(false);
+    }
   }
 
   async function handleStartMain() {
@@ -326,7 +498,7 @@ export default function ChainDetail() {
           <span className="sacred-seat-kicker">辅助链</span>
           <h3>{chain.auxiliary_trigger_action}</h3>
           <p>
-            辅助链是主链的预约窗口。倒计时结束前进入主链即履约成功；窗口结束仍未进入主链，则自动记录辅助链失败。
+            辅助链是主链的预约窗口。倒计时结束前进入主链即履约成功；确认窗口结束仍未进入主链，则进入辅助链裁决。
           </p>
         </div>
         <div className="protocol-grid">
@@ -345,6 +517,10 @@ export default function ChainDetail() {
           <button className="btn btn-primary" onClick={() => navigate(`/chains/${chain.id}/focus`)}>
             回到神圣座位
           </button>
+        ) : auxiliaryPhase === 'ruling' ? (
+          <button className="btn btn-primary" onClick={() => document.getElementById('auxiliary-ruling')?.scrollIntoView({ behavior: 'smooth' })}>
+            处理辅助链裁决
+          </button>
         ) : (
           <button className="btn btn-primary" disabled={startingMain} onClick={handleStartMain}>
             {startingMain ? '启动中...' : mainButtonLabel}
@@ -353,7 +529,7 @@ export default function ChainDetail() {
 
         <button
           className="btn btn-secondary"
-          disabled={startingAuxiliary || auxiliaryPhase === 'countdown' || auxiliaryPhase === 'confirming' || hasActiveFocusOnThisChain}
+          disabled={startingAuxiliary || auxiliaryPhase === 'countdown' || auxiliaryPhase === 'confirming' || auxiliaryPhase === 'ruling' || hasActiveFocusOnThisChain}
           onClick={handleStartAuxiliary}
         >
           {startingAuxiliary ? '启动中...' : '启动辅助链'}
@@ -370,6 +546,18 @@ export default function ChainDetail() {
         reservation={reservation}
         remaining={remaining}
         expiredResult={expiredResult}
+        doneResult={auxiliaryDoneResult}
+        behaviorType={behaviorType}
+        customBehavior={customBehavior}
+        debugCategory={debugCategory}
+        debugNote={debugNote}
+        rulingError={rulingError}
+        setBehaviorType={setBehaviorType}
+        setCustomBehavior={setCustomBehavior}
+        setDebugCategory={setDebugCategory}
+        setDebugNote={setDebugNote}
+        onResetRuling={handleAuxiliaryResetRuling}
+        onPrecedentRuling={handleAuxiliaryPrecedentRuling}
         onEnterMain={handleStartMain}
       />
 
@@ -382,7 +570,7 @@ export default function ChainDetail() {
         ) : (
           <div className="precedents-list">
             {protocolBoundaries.map((item) => (
-              <div key={`${item.source}-${item.id}`} className="precedent-item">
+              <button key={`${item.source}-${item.id}`} className="precedent-item precedent-button" onClick={() => openPrecedent(item.id)}>
                 <div className="precedent-item-header">
                   <span className="precedent-item-title">
                     <span className="boundary-source">{item.source}</span>
@@ -393,11 +581,23 @@ export default function ChainDetail() {
                   </span>
                 </div>
                 {item.description && <p className="precedent-item-desc">{item.description}</p>}
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
+
+      <PrecedentPanel
+        precedent={selectedPrecedent}
+        title={precedentTitle}
+        description={precedentDescription}
+        working={precedentWorking}
+        setTitle={setPrecedentTitle}
+        setDescription={setPrecedentDescription}
+        onClose={() => setSelectedPrecedent(null)}
+        onSave={handleUpdatePrecedent}
+        onRetire={handleRetirePrecedent}
+      />
     </div>
   );
 }
@@ -417,6 +617,18 @@ function AuxiliaryRuntime({
   reservation,
   remaining,
   expiredResult,
+  doneResult,
+  behaviorType,
+  customBehavior,
+  debugCategory,
+  debugNote,
+  rulingError,
+  setBehaviorType,
+  setCustomBehavior,
+  setDebugCategory,
+  setDebugNote,
+  onResetRuling,
+  onPrecedentRuling,
   onEnterMain,
 }: {
   phase: AuxiliaryPhase;
@@ -424,17 +636,32 @@ function AuxiliaryRuntime({
   reservation: ActiveReservationSession | null;
   remaining: number;
   expiredResult: FailReservationResetResult | null;
+  doneResult: AuxiliaryDoneResult | null;
+  behaviorType: string;
+  customBehavior: string;
+  debugCategory: string;
+  debugNote: string;
+  rulingError: string;
+  setBehaviorType: (value: string) => void;
+  setCustomBehavior: (value: string) => void;
+  setDebugCategory: (value: string) => void;
+  setDebugNote: (value: string) => void;
+  onResetRuling: () => void;
+  onPrecedentRuling: () => void;
   onEnterMain: () => void;
 }) {
   if (phase === 'idle') return null;
 
   if (phase === 'expired') {
-    const chainUpdate = expiredResult?.chain ?? chain;
+    const chainUpdate = doneResult?.data.chain ?? expiredResult?.chain ?? chain;
+    const precedent = doneResult?.kind === 'failed_precedent' ? doneResult.data.precedent : null;
     return (
       <div className="auxiliary-runtime">
-        <h3>辅助链已自动失败</h3>
+        <h3>{precedent ? '辅助链判例化完成' : '辅助链裁决完成'}</h3>
         <p className="ruling-result-desc">
-          辅助链未在确认窗口内进入主链，已记录失败。主链 {chainUpdate.name} 的长度不受影响，辅助链连续长度已清零。
+          {precedent
+            ? `新的辅助链边界已写入：${precedent.title}。主链和辅助链长度保持不变。`
+            : `辅助链已判定违约。主链 ${chainUpdate.name} 的长度不受影响，辅助链连续长度已清零。`}
         </p>
         <div className="focus-chain-update">
           <span className="focus-chain-label">{chainUpdate.name}</span>
@@ -454,6 +681,75 @@ function AuxiliaryRuntime({
               辅助最佳 <strong>{chainUpdate.auxiliary_best_length}</strong> 节
             </span>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'ruling') {
+    return (
+      <div id="auxiliary-ruling" className="auxiliary-runtime ruling-panel-wide">
+        <h3>辅助链裁决</h3>
+        <p className="ruling-desc">
+          辅助链确认窗口已经结束。现在必须把本次未履约判定为违约，或写成辅助链判例，成为未来协议边界的一部分。
+        </p>
+
+        <div className="ruling-form">
+          <label className="form-field">
+            <span>争议行为类型</span>
+            <select className="form-select" value={behaviorType} onChange={(e) => setBehaviorType(e.target.value)}>
+              {behaviorTypes.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {behaviorType === '其他' && (
+            <label className="form-field">
+              <span>自定义争议行为</span>
+              <input
+                value={customBehavior}
+                onChange={(e) => setCustomBehavior(e.target.value)}
+                placeholder="简短描述争议行为"
+              />
+            </label>
+          )}
+        </div>
+
+        <div className="debug-fields">
+          <label className="form-field">
+            <span>失败调试分类</span>
+            <select className="form-select" value={debugCategory} onChange={(e) => setDebugCategory(e.target.value)}>
+              {FAILURE_DEBUG_CATEGORIES.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field">
+            <span>调试备注</span>
+            <textarea
+              value={debugNote}
+              onChange={(e) => setDebugNote(e.target.value)}
+              placeholder="可选：记录本次预约失败的真实上下文"
+            />
+          </label>
+        </div>
+
+        {rulingError && <p className="form-error">{rulingError}</p>}
+
+        <div className="ruling-options">
+          <button className="ruling-option ruling-reset" onClick={onResetRuling}>
+            <span className="ruling-option-title">判定违约：辅助链断裂并清零</span>
+            <span className="ruling-option-consequence">主链长度不变；本次事件写入协议时间线。</span>
+          </button>
+          <button className="ruling-option ruling-precedent" onClick={onPrecedentRuling}>
+            <span className="ruling-option-title">判例化：写入辅助链边界</span>
+            <span className="ruling-option-consequence">辅助链不清零，未来同类情况默认允许。</span>
+          </button>
         </div>
       </div>
     );
@@ -486,6 +782,80 @@ function AuxiliaryRuntime({
             ? '第二预约信号已触发；确认窗口结束前进入主链仍视为履约成功。'
             : '在预约窗口结束前进入主链即视为辅助链履约成功。'}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function PrecedentPanel({
+  precedent,
+  title,
+  description,
+  working,
+  setTitle,
+  setDescription,
+  onClose,
+  onSave,
+  onRetire,
+}: {
+  precedent: ProtocolPrecedent | null;
+  title: string;
+  description: string;
+  working: boolean;
+  setTitle: (value: string) => void;
+  setDescription: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+  onRetire: () => void;
+}) {
+  if (!precedent) return null;
+
+  const scopeLabel = precedent.scope === 'main_chain' ? '主链' : '辅助链';
+  const sourceLabel = precedent.created_from_session_type === 'focus' ? '神圣座位' : '辅助链';
+
+  return (
+    <div className="precedent-detail-panel">
+      <div className="precedent-detail-header">
+        <div>
+          <span className={`formula-status status-${precedent.status === 'active' ? 'active' : 'inactive'}`}>
+            {precedent.status === 'active' ? '生效中' : '已废止'}
+          </span>
+          <h3>判例详情</h3>
+        </div>
+        <button className="btn btn-secondary" onClick={onClose}>
+          关闭
+        </button>
+      </div>
+
+      <div className="precedent-detail-grid">
+        <ProtocolFact label="作用域" value={scopeLabel} />
+        <ProtocolFact label="来源" value={`${sourceLabel} #${precedent.created_from_session_id ?? '-'}`} />
+        <ProtocolFact label="创建时间" value={formatDateTime(precedent.created_at)} />
+        <ProtocolFact label="更新时间" value={precedent.updated_at ? formatDateTime(precedent.updated_at) : '-'} />
+      </div>
+
+      <label className="form-field">
+        <span>判例标题</span>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={precedent.status === 'retired'} />
+      </label>
+      <label className="form-field">
+        <span>描述</span>
+        <textarea
+          rows={4}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={precedent.status === 'retired'}
+          placeholder="记录这个判例允许什么，以及边界在哪里"
+        />
+      </label>
+
+      <div className="precedent-detail-actions">
+        <button className="btn btn-primary" disabled={working || precedent.status === 'retired'} onClick={onSave}>
+          {working ? '保存中...' : '保存判例'}
+        </button>
+        <button className="btn-danger-outline compact-btn" disabled={working || precedent.status === 'retired'} onClick={onRetire}>
+          废止判例
+        </button>
       </div>
     </div>
   );

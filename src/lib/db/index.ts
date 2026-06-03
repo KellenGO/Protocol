@@ -9,6 +9,7 @@ import type {
   DashboardSummary,
   FailResetResult,
   FailPrecedentResult,
+  FailReservationPrecedentResult,
   FailReservationResetResult,
   FulfillReservationResult,
   GlobalActiveFocusSession,
@@ -16,6 +17,7 @@ import type {
   FormulaEvent,
   FormulaReview,
   ProtocolEvent,
+  ProtocolPrecedent,
   ProtocolTimelineEvent,
   RsipFormula,
   RsipSummary,
@@ -168,6 +170,25 @@ export async function getChainReservationPrecedents(
   return invoke('get_chain_reservation_precedents', { chainId });
 }
 
+export async function getPrecedent(id: number): Promise<ProtocolPrecedent> {
+  return invoke('get_precedent', { id });
+}
+
+export async function updatePrecedent(
+  id: number,
+  input: PrecedentInput,
+): Promise<ProtocolPrecedent> {
+  return invoke('update_precedent', {
+    id,
+    title: input.title,
+    description: input.description,
+  });
+}
+
+export async function retirePrecedent(id: number): Promise<ProtocolPrecedent> {
+  return invoke('retire_precedent', { id });
+}
+
 export async function startReservationSession(
   chainId: number,
 ): Promise<ActiveReservationSession> {
@@ -186,6 +207,35 @@ export async function expireReservationSession(
   return invoke('expire_reservation_session', { reservationId });
 }
 
+export async function failReservationSessionReset(
+  reservationId: number,
+  behaviorType?: string,
+  debugCategory?: string,
+  debugNote?: string,
+): Promise<FailReservationResetResult> {
+  return invoke('fail_reservation_session_reset', {
+    reservationId,
+    behaviorType: behaviorType ?? null,
+    debugCategory: debugCategory ?? null,
+    debugNote: debugNote ?? null,
+  });
+}
+
+export async function failReservationSessionPrecedent(
+  reservationId: number,
+  input: PrecedentInput,
+  debugCategory?: string,
+  debugNote?: string,
+): Promise<FailReservationPrecedentResult> {
+  return invoke('fail_reservation_session_precedent', {
+    reservationId,
+    title: input.title,
+    description: input.description,
+    debugCategory: debugCategory ?? null,
+    debugNote: debugNote ?? null,
+  });
+}
+
 export async function createRsipFormula(params: {
   title: string;
   description: string;
@@ -200,6 +250,20 @@ export async function createRsipFormula(params: {
 
 export async function getRsipFormulas(): Promise<RsipFormula[]> {
   return invoke('get_rsip_formulas');
+}
+
+export async function updateRsipFormula(
+  id: number,
+  params: {
+    title: string;
+    description: string;
+  },
+): Promise<RsipFormula> {
+  return invoke('update_rsip_formula', {
+    id,
+    title: params.title,
+    description: params.description,
+  });
 }
 
 export async function activateRsipFormula(id: number): Promise<RsipFormula> {

@@ -61,7 +61,10 @@ CREATE TABLE IF NOT EXISTS precedents (
     description TEXT NOT NULL DEFAULT '',
     created_from_session_id INTEGER,
     created_from_session_type TEXT CHECK(created_from_session_type IN ('focus', 'reservation')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'retired')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT,
+    retired_at TEXT,
     FOREIGN KEY (chain_id) REFERENCES chains(id) ON DELETE CASCADE
 );
 

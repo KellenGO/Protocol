@@ -27,7 +27,7 @@ export const COMPLETION_CONDITION_TEMPLATES = [
 export const AUXILIARY_COMPLETION_TEMPLATES = [
   '在预约时间结束前启动该主链的正式任务。',
   '预约到期后立即触发主链，不再重新谈判。',
-  '到期时若仍未进入主链，自动记录辅助链失败。',
+  '确认窗口结束后若仍未进入主链，进入辅助链裁决。',
 ];
 
 export const FAILURE_DEBUG_CATEGORIES = [

@@ -4,7 +4,6 @@ use db::Database;
 use tauri::Manager;
 
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
-const AUXILIARY_EXPIRED_NOTE: &str = "未在预约时间内进入主链";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
 const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at";
 
@@ -86,6 +85,22 @@ fn formula_event_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::V
     }))
 }
 
+fn precedent_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "chain_id": row.get::<_, i64>(1)?,
+        "scope": row.get::<_, String>(2)?,
+        "title": row.get::<_, String>(3)?,
+        "description": row.get::<_, String>(4)?,
+        "created_from_session_id": row.get::<_, Option<i64>>(5)?,
+        "created_from_session_type": row.get::<_, Option<String>>(6)?,
+        "status": row.get::<_, String>(7)?,
+        "created_at": row.get::<_, String>(8)?,
+        "updated_at": row.get::<_, Option<String>>(9)?,
+        "retired_at": row.get::<_, Option<String>>(10)?,
+    }))
+}
+
 fn get_chain_json(conn: &rusqlite::Connection, id: i64) -> Result<serde_json::Value, String> {
     conn.query_row(
         &format!("SELECT {} FROM chains WHERE id = ?1", CHAIN_FIELDS),
@@ -117,12 +132,54 @@ fn reservation_phase_from_times(
     }
 }
 
-fn reservation_failure_is_due(
-    due_at: &str,
-    confirmation_due_at: Option<&str>,
-    now: &str,
-) -> bool {
+fn reservation_failure_is_due(due_at: &str, confirmation_due_at: Option<&str>, now: &str) -> bool {
     now >= confirmation_due_at.unwrap_or(due_at)
+}
+
+#[cfg(test)]
+fn reservation_result_after_confirmation_deadline() -> (Option<String>, Option<String>) {
+    (None, Some(PENDING_RULING_NOTE.to_string()))
+}
+
+#[cfg(test)]
+fn auxiliary_length_after_reservation_reset_ruling(_current_length: i64) -> i64 {
+    0
+}
+
+#[cfg(test)]
+fn auxiliary_length_after_reservation_precedent_ruling(current_length: i64) -> i64 {
+    current_length
+}
+
+#[cfg(test)]
+fn active_precedent_titles(precedents: Vec<(&str, &str)>) -> Vec<String> {
+    precedents
+        .into_iter()
+        .filter_map(|(title, status)| {
+            if status == "active" {
+                Some(title.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn clean_rsip_formula_edit(title: &str, description: &str) -> Result<(String, String), String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("定式标题不能为空".into());
+    }
+    Ok((title, description.trim().to_string()))
+}
+
+fn clean_rsip_deactivation_note(note: Option<String>) -> String {
+    let cleaned = note.unwrap_or_default().trim().to_string();
+    if cleaned.is_empty() {
+        "用户裁定该定式当前熄灭".to_string()
+    } else {
+        cleaned
+    }
 }
 
 fn get_auxiliary_confirmation_window_minutes(conn: &rusqlite::Connection) -> Result<i64, String> {
@@ -145,26 +202,14 @@ fn get_auxiliary_confirmation_window_minutes(conn: &rusqlite::Connection) -> Res
 
 fn expire_overdue_reservation_sessions(conn: &rusqlite::Connection) -> Result<usize, String> {
     conn.execute(
-        "UPDATE chains
-         SET auxiliary_current_length = 0,
-             updated_at = datetime('now')
-         WHERE id IN (
-             SELECT chain_id FROM reservation_sessions
-             WHERE result IS NULL
-               AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')
-         )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    conn.execute(
         "UPDATE reservation_sessions
-         SET result = 'failed_reset',
-             failure_note = ?1,
+         SET failure_note = ?1,
              debug_category = NULL,
              debug_note = NULL
-         WHERE result IS NULL AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')",
-        [AUXILIARY_EXPIRED_NOTE],
+         WHERE result IS NULL
+           AND (failure_note IS NULL OR failure_note != ?1)
+           AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')",
+        [PENDING_RULING_NOTE],
     )
     .map_err(|e| e.to_string())
 }
@@ -219,12 +264,11 @@ fn expire_reservation_session_by_id(
     let rows = conn
         .execute(
             "UPDATE reservation_sessions
-             SET result = 'failed_reset',
-                 failure_note = ?2,
+             SET failure_note = ?2,
                  debug_category = NULL,
                  debug_note = NULL
              WHERE id = ?1 AND result IS NULL AND datetime(COALESCE(confirmation_due_at, due_at)) <= datetime('now')",
-            rusqlite::params![reservation_id, AUXILIARY_EXPIRED_NOTE],
+            rusqlite::params![reservation_id, PENDING_RULING_NOTE],
         )
         .map_err(|e| e.to_string())?;
 
@@ -232,16 +276,56 @@ fn expire_reservation_session_by_id(
         return Err("辅助链确认窗口尚未结束".into());
     }
 
+    reservation_failure_result_json(conn, reservation_id, chain_id)
+}
+
+fn prepare_reservation_ruling(
+    conn: &rusqlite::Connection,
+    reservation_id: i64,
+) -> Result<i64, String> {
+    let (chain_id, due_at, confirmation_due_at, failure_note, now): (
+        i64,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+    ) = conn
+        .query_row(
+            "SELECT chain_id, due_at, confirmation_due_at, failure_note, datetime('now')
+             FROM reservation_sessions
+             WHERE id = ?1 AND result IS NULL",
+            [reservation_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|_| "辅助链不存在或已结束".to_string())?;
+
+    if failure_note.as_deref() == Some(PENDING_RULING_NOTE) {
+        return Ok(chain_id);
+    }
+
+    if !reservation_failure_is_due(&due_at, confirmation_due_at.as_deref(), &now) {
+        return Err("辅助链确认窗口尚未结束".into());
+    }
+
     conn.execute(
-        "UPDATE chains
-         SET auxiliary_current_length = 0,
-             updated_at = datetime('now')
-         WHERE id = ?1",
-        [chain_id],
+        "UPDATE reservation_sessions
+         SET failure_note = ?2,
+             debug_category = NULL,
+             debug_note = NULL
+         WHERE id = ?1 AND result IS NULL",
+        rusqlite::params![reservation_id, PENDING_RULING_NOTE],
     )
     .map_err(|e| e.to_string())?;
 
-    reservation_failure_result_json(conn, reservation_id, chain_id)
+    Ok(chain_id)
 }
 
 #[tauri::command]
@@ -732,7 +816,7 @@ fn fail_focus_session_precedent(
     .map_err(|e| e.to_string())?;
 
     tx.execute(
-        "INSERT INTO precedents (chain_id, scope, title, description, created_from_session_id, created_from_session_type) VALUES (?1, 'main_chain', ?2, ?3, ?4, 'focus')",
+        "INSERT INTO precedents (chain_id, scope, title, description, created_from_session_id, created_from_session_type, updated_at) VALUES (?1, 'main_chain', ?2, ?3, ?4, 'focus', datetime('now'))",
         rusqlite::params![chain_id, title.trim(), description.trim(), session_id],
     )
     .map_err(|e| e.to_string())?;
@@ -767,20 +851,9 @@ fn fail_focus_session_precedent(
     let chain = get_chain_json(&conn, chain_id)?;
 
     let precedent = conn.query_row(
-        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, created_at FROM precedents WHERE id = ?1",
+        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE id = ?1",
         [precedent_id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "chain_id": row.get::<_, i64>(1)?,
-                "scope": row.get::<_, String>(2)?,
-                "title": row.get::<_, String>(3)?,
-                "description": row.get::<_, String>(4)?,
-                "created_from_session_id": row.get::<_, Option<i64>>(5)?,
-                "created_from_session_type": row.get::<_, Option<String>>(6)?,
-                "created_at": row.get::<_, String>(7)?,
-            }))
-        },
+        precedent_json,
     )
     .map_err(|e| e.to_string())?;
 
@@ -792,26 +865,137 @@ fn fail_focus_session_precedent(
 }
 
 #[tauri::command]
+fn fail_reservation_session_reset(
+    state: tauri::State<'_, Database>,
+    reservation_id: i64,
+    behavior_type: Option<String>,
+    debug_category: Option<String>,
+    debug_note: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let failure_note = behavior_note(behavior_type);
+    let debug_category = optional_note(debug_category);
+    let debug_note = optional_note(debug_note);
+
+    let chain_id = prepare_reservation_ruling(&conn, reservation_id)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let rows = tx
+        .execute(
+            "UPDATE reservation_sessions
+         SET result = 'failed_reset',
+             failure_note = ?2,
+             debug_category = ?3,
+             debug_note = ?4
+         WHERE id = ?1 AND result IS NULL AND failure_note = ?5",
+            rusqlite::params![
+                reservation_id,
+                failure_note,
+                debug_category,
+                debug_note,
+                PENDING_RULING_NOTE
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    if rows == 0 {
+        return Err("辅助链不存在或已结束".into());
+    }
+
+    tx.execute(
+        "UPDATE chains
+         SET auxiliary_current_length = 0,
+             updated_at = datetime('now')
+         WHERE id = ?1",
+        [chain_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    reservation_failure_result_json(&conn, reservation_id, chain_id)
+}
+
+#[tauri::command]
+fn fail_reservation_session_precedent(
+    state: tauri::State<'_, Database>,
+    reservation_id: i64,
+    title: String,
+    description: String,
+    debug_category: Option<String>,
+    debug_note: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if title.trim().is_empty() {
+        return Err("判例标题不能为空".into());
+    }
+
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let failure_note = Some(title.trim().to_string());
+    let debug_category = optional_note(debug_category);
+    let debug_note = optional_note(debug_note);
+
+    let chain_id = prepare_reservation_ruling(&conn, reservation_id)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let rows = tx
+        .execute(
+            "UPDATE reservation_sessions
+         SET result = 'failed_precedent',
+             failure_note = ?2,
+             debug_category = ?3,
+             debug_note = ?4
+         WHERE id = ?1 AND result IS NULL AND failure_note = ?5",
+            rusqlite::params![
+                reservation_id,
+                failure_note,
+                debug_category,
+                debug_note,
+                PENDING_RULING_NOTE
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    if rows == 0 {
+        return Err("辅助链不存在或已结束".into());
+    }
+
+    tx.execute(
+        "INSERT INTO precedents (chain_id, scope, title, description, created_from_session_id, created_from_session_type, updated_at) VALUES (?1, 'reservation_chain', ?2, ?3, ?4, 'reservation', datetime('now'))",
+        rusqlite::params![chain_id, title.trim(), description.trim(), reservation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    let precedent_id = tx.last_insert_rowid();
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let base = reservation_failure_result_json(&conn, reservation_id, chain_id)?;
+    let precedent = conn
+        .query_row(
+            "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE id = ?1",
+            [precedent_id],
+            precedent_json,
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "session": base["session"].clone(),
+        "chain": base["chain"].clone(),
+        "precedent": precedent,
+    }))
+}
+
+#[tauri::command]
 fn get_chain_precedents(
     state: tauri::State<'_, Database>,
     chain_id: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, chain_id, scope, title, description, created_at FROM precedents WHERE chain_id = ?1 AND scope = 'main_chain' ORDER BY created_at DESC")
+        .prepare("SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE chain_id = ?1 AND scope = 'main_chain' AND status = 'active' ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([chain_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "chain_id": row.get::<_, i64>(1)?,
-                "scope": row.get::<_, String>(2)?,
-                "title": row.get::<_, String>(3)?,
-                "description": row.get::<_, String>(4)?,
-                "created_at": row.get::<_, String>(5)?,
-            }))
-        })
+        .query_map([chain_id], precedent_json)
         .map_err(|e| e.to_string())?;
 
     let mut precedents = Vec::new();
@@ -828,20 +1012,11 @@ fn get_chain_reservation_precedents(
 ) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, chain_id, scope, title, description, created_at FROM precedents WHERE chain_id = ?1 AND scope = 'reservation_chain' ORDER BY created_at DESC")
+        .prepare("SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE chain_id = ?1 AND scope = 'reservation_chain' AND status = 'active' ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([chain_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "chain_id": row.get::<_, i64>(1)?,
-                "scope": row.get::<_, String>(2)?,
-                "title": row.get::<_, String>(3)?,
-                "description": row.get::<_, String>(4)?,
-                "created_at": row.get::<_, String>(5)?,
-            }))
-        })
+        .query_map([chain_id], precedent_json)
         .map_err(|e| e.to_string())?;
 
     let mut precedents = Vec::new();
@@ -849,6 +1024,109 @@ fn get_chain_reservation_precedents(
         precedents.push(row.map_err(|e| e.to_string())?);
     }
     Ok(precedents)
+}
+
+#[tauri::command]
+fn get_precedent(state: tauri::State<'_, Database>, id: i64) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE id = ?1",
+        [id],
+        precedent_json,
+    )
+    .map_err(|_| "判例不存在".to_string())
+}
+
+fn ensure_precedent_can_update(conn: &rusqlite::Connection, id: i64) -> Result<(), String> {
+    let status: String = conn
+        .query_row("SELECT status FROM precedents WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .map_err(|_| "判例不存在".to_string())?;
+
+    if status == "retired" {
+        return Err("已废止判例不能编辑".into());
+    }
+
+    Ok(())
+}
+
+fn get_precedent_record(conn: &rusqlite::Connection, id: i64) -> Result<serde_json::Value, String> {
+    conn.query_row(
+        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE id = ?1",
+        [id],
+        precedent_json,
+    )
+    .map_err(|_| "判例不存在".to_string())
+}
+
+fn retire_precedent_record(
+    conn: &rusqlite::Connection,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    let status: String = conn
+        .query_row("SELECT status FROM precedents WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .map_err(|_| "判例不存在".to_string())?;
+
+    if status == "retired" {
+        return get_precedent_record(conn, id);
+    }
+
+    conn.execute(
+        "UPDATE precedents
+         SET status = 'retired',
+             retired_at = datetime('now'),
+             updated_at = datetime('now')
+         WHERE id = ?1 AND status = 'active'",
+        [id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    get_precedent_record(conn, id)
+}
+
+#[tauri::command]
+fn update_precedent(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    title: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let title = clean_required(title, "判例标题不能为空")?;
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    ensure_precedent_can_update(&conn, id)?;
+    let rows = conn
+        .execute(
+            "UPDATE precedents
+             SET title = ?2,
+                 description = ?3,
+                 updated_at = datetime('now')
+             WHERE id = ?1 AND status = 'active'",
+            rusqlite::params![id, title, description.trim()],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if rows == 0 {
+        return Err("判例不存在".into());
+    }
+
+    conn.query_row(
+        "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents WHERE id = ?1",
+        [id],
+        precedent_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn retire_precedent(
+    state: tauri::State<'_, Database>,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    retire_precedent_record(&conn, id)
 }
 
 #[tauri::command]
@@ -1196,7 +1474,8 @@ fn get_dashboard_summary(state: tauri::State<'_, Database>) -> Result<serde_json
         };
         (state_str.to_string(), Some(fid), Some(fname))
     } else if let Some((rid, rname, due, confirmation_due, note, now)) = active_reservation {
-        let phase = reservation_phase_from_times(&due, confirmation_due.as_deref(), note.as_deref(), &now);
+        let phase =
+            reservation_phase_from_times(&due, confirmation_due.as_deref(), note.as_deref(), &now);
         let state_str = if phase == "pending_ruling" {
             "reservation_pending_ruling"
         } else if phase == "confirming" {
@@ -1357,6 +1636,42 @@ fn get_rsip_formulas(state: tauri::State<'_, Database>) -> Result<Vec<serde_json
 }
 
 #[tauri::command]
+fn update_rsip_formula(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    title: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let (title, description) = clean_rsip_formula_edit(&title, &description)?;
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    let rows = conn
+        .execute(
+            "UPDATE rsip_formulas
+             SET title = ?2,
+                 description = ?3,
+                 updated_at = datetime('now')
+             WHERE id = ?1",
+            rusqlite::params![id, title, description],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if rows == 0 {
+        return Err("定式不存在".into());
+    }
+
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM rsip_formulas WHERE id = ?1",
+            RSIP_FORMULA_FIELDS
+        ),
+        [id],
+        rsip_formula_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn activate_rsip_formula(
     state: tauri::State<'_, Database>,
     id: i64,
@@ -1419,7 +1734,7 @@ fn deactivate_rsip_formula(
         return Err("定式不存在".into());
     }
 
-    let clean_note = note.unwrap_or_default().trim().to_string();
+    let clean_note = clean_rsip_deactivation_note(note);
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let active_descendants: Vec<i64> = {
@@ -1766,14 +2081,20 @@ pub fn run() {
             fail_focus_session_precedent,
             get_chain_precedents,
             get_chain_reservation_precedents,
+            get_precedent,
+            update_precedent,
+            retire_precedent,
             get_global_active_reservation_session,
             start_reservation_session,
             fulfill_reservation_and_start_focus,
             expire_reservation_session,
+            fail_reservation_session_reset,
+            fail_reservation_session_precedent,
             get_dashboard_summary,
             get_recent_protocol_events,
             create_rsip_formula,
             get_rsip_formulas,
+            update_rsip_formula,
             activate_rsip_formula,
             deactivate_rsip_formula,
             get_formula_events,
@@ -1839,5 +2160,224 @@ mod tests {
             None,
             "2026-06-03 10:00:00",
         ));
+    }
+
+    #[test]
+    fn reservation_ruling_guard_rejects_countdown_phase() {
+        let conn = reservation_guard_test_conn(
+            "datetime('now', '+5 minutes')",
+            "datetime('now', '+8 minutes')",
+            None,
+        );
+
+        let result = prepare_reservation_ruling(&conn, 1);
+
+        assert_eq!(result.unwrap_err(), "辅助链确认窗口尚未结束");
+        let note: Option<String> = conn
+            .query_row(
+                "SELECT failure_note FROM reservation_sessions WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(note, None);
+    }
+
+    #[test]
+    fn reservation_ruling_guard_rejects_confirming_phase() {
+        let conn = reservation_guard_test_conn(
+            "datetime('now', '-1 minute')",
+            "datetime('now', '+2 minutes')",
+            None,
+        );
+
+        let result = prepare_reservation_ruling(&conn, 1);
+
+        assert_eq!(result.unwrap_err(), "辅助链确认窗口尚未结束");
+    }
+
+    #[test]
+    fn reservation_ruling_guard_marks_overdue_as_pending() {
+        let conn = reservation_guard_test_conn(
+            "datetime('now', '-5 minutes')",
+            "datetime('now', '-2 minutes')",
+            None,
+        );
+
+        let chain_id = prepare_reservation_ruling(&conn, 1).unwrap();
+
+        assert_eq!(chain_id, 42);
+        let note: Option<String> = conn
+            .query_row(
+                "SELECT failure_note FROM reservation_sessions WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(note.as_deref(), Some(PENDING_RULING_NOTE));
+    }
+
+    #[test]
+    fn reservation_ruling_guard_allows_existing_pending_ruling() {
+        let conn = reservation_guard_test_conn(
+            "datetime('now', '+5 minutes')",
+            "datetime('now', '+8 minutes')",
+            Some(PENDING_RULING_NOTE),
+        );
+
+        let chain_id = prepare_reservation_ruling(&conn, 1).unwrap();
+
+        assert_eq!(chain_id, 42);
+    }
+
+    #[test]
+    fn overdue_reservation_enters_pending_ruling() {
+        assert_eq!(
+            reservation_result_after_confirmation_deadline(),
+            (None, Some(PENDING_RULING_NOTE.to_string()))
+        );
+    }
+
+    #[test]
+    fn reservation_reset_ruling_breaks_auxiliary_chain() {
+        assert_eq!(auxiliary_length_after_reservation_reset_ruling(4), 0);
+    }
+
+    #[test]
+    fn reservation_precedent_ruling_preserves_auxiliary_chain() {
+        assert_eq!(auxiliary_length_after_reservation_precedent_ruling(4), 4);
+    }
+
+    #[test]
+    fn retired_precedents_are_hidden_from_active_boundaries() {
+        let precedents = vec![("通讯 / 消息打断", "active"), ("临时照顾家人", "retired")];
+
+        let active = active_precedent_titles(precedents);
+
+        assert_eq!(active, vec!["通讯 / 消息打断".to_string()]);
+    }
+
+    #[test]
+    fn retired_precedent_cannot_be_edited() {
+        let conn = precedent_guard_test_conn("retired");
+
+        let result = ensure_precedent_can_update(&conn, 1);
+
+        assert_eq!(result.unwrap_err(), "已废止判例不能编辑");
+    }
+
+    #[test]
+    fn active_precedent_can_be_edited() {
+        let conn = precedent_guard_test_conn("active");
+
+        assert!(ensure_precedent_can_update(&conn, 1).is_ok());
+    }
+
+    #[test]
+    fn second_precedent_retire_keeps_existing_retired_at() {
+        let conn = precedent_guard_test_conn("retired");
+        let before: Option<String> = conn
+            .query_row(
+                "SELECT retired_at FROM precedents WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let retired = retire_precedent_record(&conn, 1).unwrap();
+        let after: Option<String> = conn
+            .query_row(
+                "SELECT retired_at FROM precedents WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(retired["status"].as_str(), Some("retired"));
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn rsip_formula_edit_rejects_empty_title() {
+        assert!(clean_rsip_formula_edit("  ", "执行说明").is_err());
+    }
+
+    #[test]
+    fn rsip_formula_edit_trims_title_and_description() {
+        let cleaned = clean_rsip_formula_edit("  饭后洗碗  ", "  十分钟内完成  ").unwrap();
+        assert_eq!(
+            cleaned,
+            ("饭后洗碗".to_string(), "十分钟内完成".to_string())
+        );
+    }
+
+    #[test]
+    fn rsip_deactivation_note_uses_default_when_blank() {
+        assert_eq!(
+            clean_rsip_deactivation_note(Some("  ".to_string())),
+            "用户裁定该定式当前熄灭".to_string()
+        );
+    }
+
+    fn reservation_guard_test_conn(
+        due_expr: &str,
+        confirmation_expr: &str,
+        failure_note: Option<&str>,
+    ) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE reservation_sessions (
+                id INTEGER PRIMARY KEY,
+                chain_id INTEGER NOT NULL,
+                due_at TEXT NOT NULL,
+                confirmation_due_at TEXT,
+                result TEXT,
+                failure_note TEXT,
+                debug_category TEXT,
+                debug_note TEXT
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            &format!(
+                "INSERT INTO reservation_sessions (
+                    id, chain_id, due_at, confirmation_due_at, failure_note
+                 ) VALUES (1, 42, {due_expr}, {confirmation_expr}, ?1)"
+            ),
+            [failure_note],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn precedent_guard_test_conn(status: &str) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE precedents (
+                id INTEGER PRIMARY KEY,
+                chain_id INTEGER NOT NULL,
+                scope TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                created_from_session_id INTEGER,
+                created_from_session_type TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT,
+                retired_at TEXT
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO precedents (
+                id, chain_id, scope, title, description, status, retired_at
+             ) VALUES (
+                1, 1, 'main_chain', '边界', '描述', ?1,
+                CASE WHEN ?1 = 'retired' THEN '2026-06-03 10:00:00' ELSE NULL END
+             )",
+            [status],
+        )
+        .unwrap();
+        conn
     }
 }
