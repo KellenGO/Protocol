@@ -7,6 +7,7 @@ import type { ChainReviewStats, FailureDebugSummary, PrecedentReviewItem } from 
 type ReviewTab = 'chains' | 'failures' | 'precedents';
 type TimePeriod = 'all' | '7d' | '30d' | 'month';
 
+/** 构建本地时间的 since 字符串，避免 UTC 偏移导致日期不符合直觉 */
 function sinceFromPeriod(period: TimePeriod): string | null {
   if (period === 'all') return null;
   const now = new Date();
@@ -18,7 +19,8 @@ function sinceFromPeriod(period: TimePeriod): string | null {
     now.setDate(1);
     now.setHours(0, 0, 0, 0);
   }
-  return now.toISOString().replace('T', ' ').slice(0, 19);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }
 
 const PERIOD_LABELS: Record<TimePeriod, string> = {
@@ -33,6 +35,9 @@ const TABS: { key: ReviewTab; label: string }[] = [
   { key: 'failures', label: '失败模式复盘' },
   { key: 'precedents', label: '判例复盘' },
 ];
+
+const REVIEW_HINT =
+  'History（历史记录）展示协议事件时间线，用于回顾每次具体事件。Review（复盘）聚焦失败模式、协议边界变化和链稳定性，用于发现规律与调整协议配置。';
 
 function scopeLabel(scope: string): string {
   return scope === 'main_chain' ? '主链' : '辅助链';
@@ -49,13 +54,8 @@ export default function Review() {
   const [period, setPeriod] = useState<TimePeriod>('all');
   const [loading, setLoading] = useState(true);
 
-  // Chains review
   const [chainStats, setChainStats] = useState<ChainReviewStats[]>([]);
-
-  // Failures review
   const [failureSummary, setFailureSummary] = useState<FailureDebugSummary[]>([]);
-
-  // Precedents review
   const [precedentList, setPrecedentList] = useState<PrecedentReviewItem[]>([]);
 
   useEffect(() => {
@@ -85,6 +85,10 @@ export default function Review() {
       <div className="page-header">
         <h2>协议复盘</h2>
       </div>
+
+      <p className="page-subtitle" style={{ marginTop: 0, marginBottom: 20 }}>
+        {REVIEW_HINT}
+      </p>
 
       <div className="review-tabs">
         {TABS.map((t) => (
@@ -248,6 +252,20 @@ function FailuresReview({
               <span className="review-failure-category">{item.category}</span>
               <span className="review-failure-count">{item.count} 次</span>
             </div>
+
+            <div className="review-failure-meta">
+              {item.last_occurred_at && (
+                <span className="review-failure-last">
+                  最近发生：{formatProtocolDateTime(item.last_occurred_at)}
+                </span>
+              )}
+              {item.chain_names.length > 0 && (
+                <span className="review-failure-chains">
+                  涉及主链：{item.chain_names.join('、')}
+                </span>
+              )}
+            </div>
+
             {item.recent_notes.length > 0 && (
               <div className="review-failure-notes">
                 <span className="review-failure-notes-label">最近失败备注</span>
@@ -258,6 +276,10 @@ function FailuresReview({
                 ))}
               </div>
             )}
+
+            <div className="review-failure-prompt">
+              建议检查该链的触发动作、完成条件或辅助链配置。
+            </div>
           </div>
         ))}
       </div>
@@ -297,6 +319,11 @@ function PrecedentsReview({
           共 <strong>{list.length}</strong> 条判例（生效 <strong>{activeCount}</strong>，废止 <strong>{retiredCount}</strong>）
         </span>
       </div>
+
+      <p className="review-precedent-legend">
+        <strong>生效中 (Active)</strong> 的判例仍定义当前协议边界，表示同类情形默认允许。
+        <strong>已废止 (Retired)</strong> 的判例保留历史记录，但不再作为当前协议边界生效。
+      </p>
 
       <div className="precedents-list">
         {list.map((p) => {

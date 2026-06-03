@@ -2085,9 +2085,10 @@ fn get_failure_debug_summary(
         .collect()
     };
 
-    // Fetch recent notes for each category (up to 5)
+    // Fetch per-category detail: recent notes, last occurred time, and involved chain names
     let mut results = Vec::new();
     for (category, count) in categories {
+        // Recent notes (up to 5)
         let mut notes_sql = String::from(
             "SELECT note FROM (SELECT debug_note AS note, created_at FROM focus_sessions WHERE debug_category = ?1 AND debug_note IS NOT NULL AND debug_note != '' AND (result = 'failed_reset' OR result = 'failed_precedent')",
         );
@@ -2119,10 +2120,73 @@ fn get_failure_debug_summary(
                 .collect()
         };
 
+        // Last occurred time (most recent created_at across both session types)
+        let mut last_sql = String::from(
+            "SELECT MAX(created_at) FROM (SELECT created_at FROM focus_sessions WHERE debug_category = ?1 AND (result = 'failed_reset' OR result = 'failed_precedent')",
+        );
+        if since_filter.is_some() {
+            last_sql.push_str(" AND created_at >= ?3");
+        }
+        last_sql.push_str(" UNION ALL SELECT created_at FROM reservation_sessions WHERE debug_category = ?2 AND (result = 'failed_reset' OR result = 'failed_precedent')");
+        if since_filter.is_some() {
+            last_sql.push_str(" AND created_at >= ?4");
+        }
+        last_sql.push_str(")");
+
+        let mut last_stmt = conn.prepare(&last_sql).map_err(|e| e.to_string())?;
+        let last_occurred_at: Option<String> = if let Some(ref s) = since_filter {
+            last_stmt
+                .query_row(rusqlite::params![category, category, s, s], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .ok()
+                .flatten()
+        } else {
+            last_stmt
+                .query_row(rusqlite::params![category, category], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .ok()
+                .flatten()
+        };
+
+        // Distinct chain names involved
+        let mut chains_sql = String::from(
+            "SELECT DISTINCT c.name FROM focus_sessions f JOIN chains c ON c.id = f.chain_id WHERE f.debug_category = ?1 AND (f.result = 'failed_reset' OR f.result = 'failed_precedent')",
+        );
+        if since_filter.is_some() {
+            chains_sql.push_str(" AND f.created_at >= ?3");
+        }
+        chains_sql.push_str(" UNION SELECT DISTINCT c.name FROM reservation_sessions r JOIN chains c ON c.id = r.chain_id WHERE r.debug_category = ?2 AND (r.result = 'failed_reset' OR r.result = 'failed_precedent')");
+        if since_filter.is_some() {
+            chains_sql.push_str(" AND r.created_at >= ?4");
+        }
+
+        let mut chains_stmt = conn.prepare(&chains_sql).map_err(|e| e.to_string())?;
+        let chain_names: Vec<String> = if let Some(ref s) = since_filter {
+            chains_stmt
+                .query_map(rusqlite::params![category, category, s, s], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect()
+        } else {
+            chains_stmt
+                .query_map(rusqlite::params![category, category], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
         results.push(serde_json::json!({
             "category": category,
             "count": count,
             "recent_notes": notes,
+            "last_occurred_at": last_occurred_at,
+            "chain_names": chain_names,
         }));
     }
 

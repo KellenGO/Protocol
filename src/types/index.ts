@@ -252,6 +252,8 @@ export interface FailureDebugSummary {
   category: string;
   count: number;
   recent_notes: string[];
+  last_occurred_at: string | null;
+  chain_names: string[];
 }
 
 /** 判例复盘：判例 + 关联链名 */
