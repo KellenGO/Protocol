@@ -1,13 +1,13 @@
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: 'D' },
-  { to: '/chains', label: '主链', icon: 'C' },
-  { to: '/history', label: '协议时间线', icon: 'H' },
-  { to: '/review', label: '协议复盘', icon: 'V' },
-  { to: '/rsip', label: 'RSIP', icon: 'R' },
-  { to: '/data-management', label: '数据管理', icon: 'M' },
-  { to: '/settings', label: '设置', icon: 'S' },
+  { to: '/', label: 'Dashboard' },
+  { to: '/chains', label: '主链' },
+  { to: '/history', label: '协议时间线' },
+  { to: '/review', label: '协议复盘' },
+  { to: '/rsip', label: 'RSIP' },
+  { to: '/data-management', label: '数据管理' },
+  { to: '/settings', label: '设置' },
 ];
 
 export default function Sidebar() {
@@ -25,7 +25,6 @@ export default function Sidebar() {
             end={item.to === '/'}
             className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
           >
-            <span className="nav-icon">{item.icon}</span>
             <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
