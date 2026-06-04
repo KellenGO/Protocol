@@ -133,7 +133,7 @@ export default function GlobalFocusButton() {
   return (
     <>
       {showToast && (
-        <div className="global-toast">
+        <div className="global-toast" role="status" aria-live="polite">
           {active.kind === 'reservation'
             ? '辅助链进入确认窗口，请进入主链或准备裁决'
             : '神圣座位时间已到，请确认主链完成'}
@@ -144,6 +144,7 @@ export default function GlobalFocusButton() {
         className={`global-focus-btn ${isDue ? 'focus-due' : ''}`}
         onClick={() => navigate(target)}
         title={`${label}：${active.data.chain_name}`}
+        aria-label={`${label}：${active.data.chain_name}`}
       >
         {label}
       </button>

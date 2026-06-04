@@ -92,7 +92,7 @@ export default function Dashboard() {
       </div>
 
       {activeState !== 'none' && summary?.active_chain_id && (
-        <div className="active-banner">
+        <div className="active-banner" role="status" aria-live="polite">
           <span className="active-banner-text">{summary.active_chain_name}</span>
           {activeState === 'focus' || activeState === 'focus_pending_ruling' ? (
             <button
@@ -120,7 +120,7 @@ export default function Dashboard() {
       <div className="recent-section">
         <h3>最近活动</h3>
         {events.length === 0 ? (
-          <p className="placeholder-text">暂无协议事件</p>
+          <p className="placeholder-text" aria-live="polite">暂无协议事件</p>
         ) : (
           <div className="recent-list">
             {events.map((e) => (

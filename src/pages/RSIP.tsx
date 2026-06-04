@@ -204,7 +204,7 @@ export default function RSIP() {
         </div>
       </div>
 
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
 
       <div className="rsip-layout">
         <section className="rsip-tree-panel">
@@ -213,9 +213,9 @@ export default function RSIP() {
             <span className="section-hint">每天最多新增一个定式更符合 RSIP 原意</span>
           </div>
           {loading ? (
-            <p className="placeholder-text">加载中…</p>
+            <p className="placeholder-text" role="status" aria-live="polite">加载中…</p>
           ) : tree.length === 0 ? (
-            <div className="empty-state compact">
+            <div className="empty-state compact" aria-live="polite">
               <p className="empty-title">还没有定式</p>
               <p className="empty-desc">
                 先创建一个足够小、足够容易存活的根定式。
@@ -289,7 +289,7 @@ export default function RSIP() {
               />
             </label>
 
-            {formError && <p className="form-error">{formError}</p>}
+            {formError && <p className="form-error" role="alert">{formError}</p>}
 
             <button className="btn btn-primary" disabled={creating} onClick={handleCreate}>
               {creating ? '创建中…' : '写入定式树'}
@@ -299,7 +299,7 @@ export default function RSIP() {
           <section className="rsip-events-card">
             <h3>最近 RSIP 事件</h3>
             {events.length === 0 ? (
-              <p className="placeholder-text">暂无定式事件</p>
+              <p className="placeholder-text" aria-live="polite">暂无定式事件</p>
             ) : (
               <div className="formula-events">
                 {events.map((event) => (
@@ -364,7 +364,7 @@ function FormulaTreeNode({
           <button className="btn btn-secondary" onClick={() => onReview(node.id)}>
             复盘
           </button>
-          <button className="btn btn-secondary" onClick={() => onAddChild(node.id)}>
+          <button className="btn btn-secondary" onClick={() => onAddChild(node.id)} aria-label={`为定式 ${node.title} 添加子定式`}>
             加子定式
           </button>
           {node.status === 'active' ? (
@@ -372,6 +372,7 @@ function FormulaTreeNode({
               className="btn-danger-outline compact-btn"
               disabled={isWorking}
               onClick={() => onDeactivate(node.id)}
+              aria-label={`熄灭定式：${node.title}`}
             >
               熄灭
             </button>
@@ -380,6 +381,7 @@ function FormulaTreeNode({
               className="btn btn-primary"
               disabled={isWorking}
               onClick={() => onActivate(node.id)}
+              aria-label={`点亮定式：${node.title}`}
             >
               点亮
             </button>
@@ -430,10 +432,10 @@ function RsipReviewPanel({
   onSave: () => void;
 }) {
   return (
-    <section className="rsip-review-card">
-      <h3>定式复盘</h3>
+    <section className="rsip-review-card" aria-labelledby="rsip-review-heading">
+      <h3 id="rsip-review-heading">定式复盘</h3>
       {loading ? (
-        <p className="placeholder-text">复盘加载中...</p>
+        <p className="placeholder-text" role="status" aria-live="polite">复盘加载中...</p>
       ) : !review ? (
         <p className="placeholder-text">在定式树中选择一个定式进行复盘。</p>
       ) : (
@@ -458,7 +460,7 @@ function RsipReviewPanel({
                 placeholder="写清触发条件、完成标准和例外边界"
               />
             </label>
-            {error && <p className="form-error">{error}</p>}
+            {error && <p className="form-error" role="alert">{error}</p>}
             <button className="btn btn-primary" disabled={saving || !canSave} onClick={onSave}>
               {saving ? '保存中...' : '保存定式'}
             </button>
@@ -485,7 +487,7 @@ function RsipReviewPanel({
           </label>
           <div className="formula-events compact-events">
             {review.events.length === 0 ? (
-              <p className="placeholder-text">暂无事件</p>
+              <p className="placeholder-text" aria-live="polite">暂无事件</p>
             ) : (
               review.events.map((event) => (
                 <div key={event.id} className="formula-event">

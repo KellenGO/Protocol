@@ -71,21 +71,36 @@ export default function History() {
       <h2>协议时间线</h2>
 
       <div className="filter-bar">
-        <select className="form-select filter-select" value={typeFilter ?? ''} onChange={(e) => setTypeFilter(e.target.value || null)}>
+        <select
+          className="form-select filter-select"
+          value={typeFilter ?? ''}
+          onChange={(e) => setTypeFilter(e.target.value || null)}
+          aria-label="按协议类型筛选"
+        >
           <option value="">全部类型</option>
           <option value="focus">主链</option>
           <option value="reservation">辅助链</option>
           <option value="rsip">RSIP</option>
         </select>
 
-        <select className="form-select filter-select" value={resultFilter ?? ''} onChange={(e) => setResultFilter(e.target.value || null)}>
+        <select
+          className="form-select filter-select"
+          value={resultFilter ?? ''}
+          onChange={(e) => setResultFilter(e.target.value || null)}
+          aria-label="按裁决结果筛选"
+        >
           <option value="">全部结果</option>
           <option value="success">完成 / 履约 / 点亮</option>
           <option value="failed">断链 / 未履约 / 熄灭</option>
           <option value="precedent">判例化</option>
         </select>
 
-        <select className="form-select filter-select" value={chainFilter ?? ''} onChange={(e) => setChainFilter(e.target.value ? Number(e.target.value) : null)}>
+        <select
+          className="form-select filter-select"
+          value={chainFilter ?? ''}
+          onChange={(e) => setChainFilter(e.target.value ? Number(e.target.value) : null)}
+          aria-label="按主链筛选"
+        >
           <option value="">全部主链</option>
           {chains.map((c) => (
             <option key={c.id} value={c.id}>{c.name}</option>
@@ -94,9 +109,9 @@ export default function History() {
       </div>
 
       {loading ? (
-        <p className="placeholder-text">加载中...</p>
+        <p className="placeholder-text" role="status" aria-live="polite">加载中...</p>
       ) : events.length === 0 ? (
-        <div className="empty-state" style={{ marginTop: 40 }}>
+        <div className="empty-state" style={{ marginTop: 40 }} aria-live="polite">
           <p className="empty-title">{hasFilter ? '没有匹配的协议事件' : '暂无协议事件'}</p>
           <p className="empty-desc">
             {hasFilter ? '尝试调整筛选条件。' : '完成主链、辅助链履约或做出裁决后，事件会出现在这里。'}
@@ -113,12 +128,14 @@ export default function History() {
                     <button
                       className="history-chain-link"
                       onClick={() => navigate(`/rsip${e.formula_id ? `?formula=${e.formula_id}` : ''}`)}
+                      aria-label={`打开 RSIP 定式：${e.formula_title ?? '未命名定式'}`}
                     >
                       {e.formula_title ?? 'RSIP 定式'}
                     </button>
                   ) : (
                     <button
                       className="history-chain-link"
+                      aria-label={`打开主链：${e.chain_name ?? '未知主链'}`}
                       onClick={() => {
                         if (!e.chain_id) return;
                         navigate(`/chains/${e.chain_id}${e.precedent_id ? `?precedent=${e.precedent_id}` : ''}`);

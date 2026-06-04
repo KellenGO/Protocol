@@ -308,7 +308,7 @@ export default function ChainDetail() {
       setSelectedPrecedent(item);
       setPrecedentTitle(item.title);
       setPrecedentDescription(item.description);
-    } catch (_err) {
+    } catch {
       setPrecedentError('判例不存在或已被删除。');
       setSelectedPrecedent(null);
     } finally {
@@ -426,7 +426,7 @@ export default function ChainDetail() {
   if (loading) {
     return (
       <div className="page">
-        <p className="placeholder-text">加载中...</p>
+        <p className="placeholder-text" role="status" aria-live="polite">加载中...</p>
       </div>
     );
   }
@@ -434,7 +434,7 @@ export default function ChainDetail() {
   if (!chain) {
     return (
       <div className="page">
-        <p className="placeholder-text">{error || '链不存在或加载失败'}</p>
+        <p className="placeholder-text" role="alert">{error || '链不存在或加载失败'}</p>
         <button className="btn btn-secondary" onClick={() => navigate('/chains')}>
           返回链列表
         </button>
@@ -513,15 +513,15 @@ export default function ChainDetail() {
       </div>
 
       <div className="detail-actions protocol-actions">
-        {warnMsg && <p className="action-warn">{warnMsg}</p>}
-        {error && <p className="action-error">{error}</p>}
+        {warnMsg && <p className="action-warn" role="status">{warnMsg}</p>}
+        {error && <p className="action-error" role="alert">{error}</p>}
 
         {hasActiveFocusOnThisChain ? (
-          <button className="btn btn-primary" onClick={() => navigate(`/chains/${chain.id}/focus`)}>
+          <button className="btn btn-primary" onClick={() => navigate(`/chains/${chain.id}/focus`)} aria-label={`回到主链 ${chain.name} 的神圣座位`}>
             回到神圣座位
           </button>
         ) : auxiliaryPhase === 'ruling' ? (
-          <button className="btn btn-primary" onClick={() => document.getElementById('auxiliary-ruling')?.scrollIntoView({ behavior: 'smooth' })}>
+          <button className="btn btn-primary" onClick={() => document.getElementById('auxiliary-ruling')?.scrollIntoView({ behavior: 'smooth' })} aria-label={`处理主链 ${chain.name} 的辅助链裁决`}>
             处理辅助链裁决
           </button>
         ) : (
@@ -564,8 +564,8 @@ export default function ChainDetail() {
         onEnterMain={handleStartMain}
       />
 
-      <div className="precedents-section">
-        <h3>协议边界</h3>
+      <div className="precedents-section" aria-labelledby="protocol-boundary-heading">
+        <h3 id="protocol-boundary-heading">协议边界</h3>
         {protocolBoundaries.length === 0 ? (
           <p className="precedents-empty">
             暂无判例。启动前默认边界保持严格；完成一次裁决并判例化后，例外会显示在这里。
@@ -573,7 +573,12 @@ export default function ChainDetail() {
         ) : (
           <div className="precedents-list">
             {protocolBoundaries.map((item) => (
-              <button key={`${item.source}-${item.id}`} className="precedent-item precedent-button" onClick={() => openPrecedent(item.id)}>
+              <button
+                key={`${item.source}-${item.id}`}
+                className="precedent-item precedent-button"
+                onClick={() => openPrecedent(item.id)}
+                aria-label={`查看${item.source}判例：${item.title}`}
+              >
                 <div className="precedent-item-header">
                   <span className="precedent-item-title">
                     <span className="boundary-source">{item.source}</span>
@@ -592,7 +597,7 @@ export default function ChainDetail() {
 
       {precedentError && (
         <div className="precedents-section">
-          <p className="review-precedent-notice">{precedentError}</p>
+          <p className="review-precedent-notice" role="alert">{precedentError}</p>
         </div>
       )}
       <PrecedentPanel
@@ -664,7 +669,7 @@ function AuxiliaryRuntime({
     const chainUpdate = doneResult?.data.chain ?? expiredResult?.chain ?? chain;
     const precedent = doneResult?.kind === 'failed_precedent' ? doneResult.data.precedent : null;
     return (
-      <div className="auxiliary-runtime">
+      <div className="auxiliary-runtime" role="status" aria-live="polite">
         <h3>{precedent ? '辅助链判例化完成' : '辅助链裁决完成'}</h3>
         <p className="ruling-result-desc">
           {precedent
@@ -696,8 +701,8 @@ function AuxiliaryRuntime({
 
   if (phase === 'ruling') {
     return (
-      <div id="auxiliary-ruling" className="auxiliary-runtime ruling-panel-wide">
-        <h3>辅助链裁决</h3>
+      <div id="auxiliary-ruling" className="auxiliary-runtime ruling-panel-wide" role="region" aria-labelledby="auxiliary-ruling-heading">
+        <h3 id="auxiliary-ruling-heading">辅助链裁决</h3>
         <p className="ruling-desc">
           辅助链确认窗口已经结束。现在必须把本次未履约判定为违约，或写成辅助链判例，成为未来协议边界的一部分。
         </p>
@@ -747,14 +752,14 @@ function AuxiliaryRuntime({
           </label>
         </div>
 
-        {rulingError && <p className="form-error">{rulingError}</p>}
+        {rulingError && <p className="form-error" role="alert">{rulingError}</p>}
 
         <div className="ruling-options">
-          <button className="ruling-option ruling-reset" onClick={onResetRuling}>
+          <button className="ruling-option ruling-reset" onClick={onResetRuling} aria-label="判定辅助链违约并清零辅助链">
             <span className="ruling-option-title">判定违约：辅助链断裂并清零</span>
             <span className="ruling-option-consequence">主链长度不变；本次事件写入协议时间线。</span>
           </button>
-          <button className="ruling-option ruling-precedent" onClick={onPrecedentRuling}>
+          <button className="ruling-option ruling-precedent" onClick={onPrecedentRuling} aria-label="将本次辅助链事件写入判例">
             <span className="ruling-option-title">判例化：写入辅助链边界</span>
             <span className="ruling-option-consequence">辅助链不清零，未来同类情况默认允许。</span>
           </button>
@@ -766,7 +771,7 @@ function AuxiliaryRuntime({
   if (!reservation) return null;
 
   return (
-    <div className="auxiliary-runtime">
+    <div className="auxiliary-runtime" role="region" aria-label="辅助链预约状态">
       <div className="res-session-header">
         <span className="res-chain-name">
           {chain.name} / {phase === 'confirming' ? '辅助链待确认' : '辅助链预约中'}
@@ -822,13 +827,13 @@ function PrecedentPanel({
   const sourceLabel = precedent.created_from_session_type === 'focus' ? '神圣座位' : '辅助链';
 
   return (
-    <div className="precedent-detail-panel">
+    <div className="precedent-detail-panel" role="region" aria-labelledby="precedent-detail-heading">
       <div className="precedent-detail-header">
         <div>
           <span className={`formula-status status-${precedent.status === 'active' ? 'active' : 'inactive'}`}>
             {precedent.status === 'active' ? '生效中' : '已废止'}
           </span>
-          <h3>判例详情</h3>
+          <h3 id="precedent-detail-heading">判例详情</h3>
         </div>
         <button className="btn btn-secondary" onClick={onClose}>
           关闭

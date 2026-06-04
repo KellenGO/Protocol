@@ -48,9 +48,9 @@ export default function ChainList() {
       )}
 
       {loading ? (
-        <p className="placeholder-text">加载中...</p>
+        <p className="placeholder-text" role="status" aria-live="polite">加载中...</p>
       ) : chains.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state" aria-live="polite">
           <p className="empty-title">还没有主链</p>
           <p className="empty-desc">
             创建一条主链，先把触发动作和完成条件写清楚，再启动神圣座位。
@@ -63,6 +63,7 @@ export default function ChainList() {
               key={chain.id}
               className="chain-card"
               onClick={() => navigate(`/chains/${chain.id}`)}
+              aria-label={`打开主链：${chain.name}`}
             >
               <div className="chain-card-main">
                 <span className="chain-card-name">{chain.name}</span>
@@ -82,11 +83,11 @@ export default function ChainList() {
                   <span className="chain-stat-value">{chain.focus_duration_minutes}min</span>
                 </span>
                 <span className="chain-stat">
-                  <span className="chain-stat-label">辅助</span>
+                  <span className="chain-stat-label">辅助链</span>
                   <span className="chain-stat-value">{chain.auxiliary_current_length} 节</span>
                 </span>
                 <span className="chain-stat">
-                  <span className="chain-stat-label">辅助最佳</span>
+                  <span className="chain-stat-label">最佳辅助链</span>
                   <span className="chain-stat-value">{chain.auxiliary_best_length} 节</span>
                 </span>
                 <span className="chain-stat">
