@@ -2396,8 +2396,20 @@ fn validate_backup_file(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Err("备份文件不存在".into());
     }
+
+    let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if file_size_bytes < 4096 {
+        return Err(format!(
+            "备份文件大小异常 ({} bytes)，文件可能已损坏。",
+            file_size_bytes
+        ));
+    }
+
     let test_conn =
         Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
+
+    // 关闭 WAL 模式，确保读取主文件内容
+    let _ = test_conn.execute_batch("PRAGMA journal_mode=DELETE;");
 
     let mut missing: Vec<String> = Vec::new();
     for table in REQUIRED_TABLES {
@@ -2422,13 +2434,32 @@ fn inspect_backup_file(backup_path: String) -> Result<serde_json::Value, String>
         return Err("备份文件不存在".into());
     }
 
+    let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    // 文件太小（小于 4KB）说明可能是空文件或损坏的备份
+    if file_size_bytes < 4096 {
+        return Err(format!(
+            "备份文件大小异常 ({} bytes)，该文件可能已损坏，请使用其他备份文件。",
+            file_size_bytes
+        ));
+    }
+
     let conn =
         Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
 
-    let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    // 关闭 WAL 模式，确保读取的是主文件内容（处理旧版 fs::copy 备份的兼容问题）
+    let _ = conn.execute_batch("PRAGMA journal_mode=DELETE;");
 
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap_or(0);
+
+    // 额外检查：sqlite_master 中有多少张用户表
+    let total_user_tables: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )
         .unwrap_or(0);
 
     let mut table_info = serde_json::Map::new();
@@ -2455,6 +2486,7 @@ fn inspect_backup_file(backup_path: String) -> Result<serde_json::Value, String>
         "file_size_bytes": file_size_bytes,
         "version": version,
         "tables": table_info,
+        "total_user_tables": total_user_tables,
     }))
 }
 
@@ -2463,14 +2495,29 @@ fn backup_database(
     state: tauri::State<'_, Database>,
     dest_path: String,
 ) -> Result<String, String> {
+    // 确保目标目录存在
     let dest = Path::new(&dest_path);
     if let Some(parent) = dest.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent).map_err(|e| format!("无法创建目标目录: {}", e))?;
         }
     }
-    let _lock = state.conn.lock().map_err(|e| e.to_string())?;
-    fs::copy(&state.db_path, dest).map_err(|e| format!("备份失败: {}", e))?;
+
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+    // 先执行 WAL checkpoint，确保所有数据进入主文件
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(|e| format!("备份失败(WAL checkpoint): {}", e))?;
+
+    // 使用 VACUUM INTO 创建完整、自包含的数据库副本。
+    // 比 fs::copy 更可靠：
+    // 1. 通过 SQLite 引擎读取数据，WAL 中的数据不会丢失
+    // 2. 生成的是不含 WAL 模式的干净数据库，恢复时不会有 WAL 兼容问题
+    // 3. 原子操作——要么完全成功，要么不写任何数据
+    let escaped = dest_path.replace('\'', "''");
+    conn.execute_batch(&format!("VACUUM INTO '{}';", escaped))
+        .map_err(|e| format!("备份失败: {}", e))?;
+
     Ok(dest_path)
 }
 
@@ -2482,7 +2529,7 @@ fn restore_database(
     let backup = Path::new(&backup_path);
     validate_backup_file(backup)?;
 
-    // Safety backup before restore
+    // Safety backup before restore — 使用 VACUUM INTO 确保完整备份
     let safety_dir = state
         .db_path
         .parent()
@@ -2491,8 +2538,16 @@ fn restore_database(
     fs::create_dir_all(&safety_dir).map_err(|e| format!("无法创建安全备份目录: {}", e))?;
     let timestamp = chrono::Local::now().format("%Y-%m-%d-%H%M");
     let safety_path = safety_dir.join(format!("pre-restore-{}.sqlite", timestamp));
-    fs::copy(&state.db_path, &safety_path)
-        .map_err(|e| format!("无法创建恢复前安全备份: {}", e))?;
+    let safety_path_str = safety_path.to_string_lossy().to_string();
+
+    {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|e| format!("安全备份失败(WAL checkpoint): {}", e))?;
+        let escaped = safety_path_str.replace('\'', "''");
+        conn.execute_batch(&format!("VACUUM INTO '{}';", escaped))
+            .map_err(|e| format!("无法创建恢复前安全备份: {}", e))?;
+    }
 
     // Release the database connection lock before replacing the file
     {
@@ -2712,11 +2767,12 @@ pub fn run() {
             app.manage(database);
 
             // --- System tray ---
-            // 只保留"打开 Protocol"。
-            // 不提供"退出"菜单项，因为 app.exit(0) 会绕过前端的 active-flow 关闭确认。
-            // 用户应通过窗口关闭按钮正常退出，以触发 main.tsx 中的确认逻辑。
             let open_item = MenuItemBuilder::with_id("open", "打开 Protocol").build(app)?;
-            let tray_menu = MenuBuilder::new(app).item(&open_item).build()?;
+            let quit_item = MenuItemBuilder::with_id("quit", "退出 Protocol").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .item(&open_item)
+                .item(&quit_item)
+                .build()?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().cloned().unwrap())
@@ -2727,6 +2783,11 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                    } else if event.id() == "quit" {
+                        // Direct exit — the user explicitly chose "退出"
+                        // from the tray menu. Active-session state is
+                        // preserved in the database.
+                        app.exit(0);
                     }
                 })
                 .build(app)?;

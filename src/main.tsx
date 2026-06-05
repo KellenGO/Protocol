@@ -1,16 +1,20 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { confirm } from '@tauri-apps/plugin-dialog';
 import { getGlobalActiveFocusSession, getGlobalActiveReservationSession } from './lib/db';
 import App from './App';
 import './styles/global.css';
 
-// --- Window close guard: warn if active sessions exist ---
-let forceClose = false;
+// --- Window close guard: hide to tray with confirmation if active sessions exist ---
 const appWindow = getCurrentWindow();
 
-appWindow.onCloseRequested(async (event: { preventDefault: () => void }) => {
-  if (forceClose) return;
+// Register the close-requested listener before rendering the app.
+// The await ensures the listener is active before any user interaction.
+const _closeUnlisten = await appWindow.onCloseRequested(async (event) => {
+  // Always prevent window destruction — we hide to tray instead.
+  // The tray icon keeps the process alive; "退出 Protocol" in the tray menu exits.
+  event.preventDefault();
 
   try {
     const [focus, reservation] = await Promise.all([
@@ -19,32 +23,31 @@ appWindow.onCloseRequested(async (event: { preventDefault: () => void }) => {
     ]);
 
     if (focus || reservation) {
-      event.preventDefault();
       const parts: string[] = [];
       if (focus) parts.push(`神圣座位「${focus.chain_name}」${focus.pending_ruling ? '待裁决' : '进行中'}`);
       if (reservation) parts.push(`辅助链「${reservation.chain_name}」${reservation.pending_ruling ? '待裁决' : '进行中'}`);
 
-      const lines: string[] = [
-        'Protocol 中有活跃的协议流程：',
-        '',
-        ...parts.map((p) => `  ${p}`),
-        '',
-        '关闭窗口不会自动结束协议，协议状态将在数据库中保留。',
-        '重新打开应用后，你仍需回到任务页完成或裁决。',
-        '',
-        '确定要关闭窗口吗？',
-      ];
-
-      const confirmed = window.confirm(lines.join('\n'));
-      if (confirmed) {
-        forceClose = true;
-        await appWindow.close();
-      }
+      const confirmed = await confirm(
+        'Protocol 中有活跃的协议流程：\n\n' +
+        parts.map((p) => `  ${p}`).join('\n') +
+        '\n\n关闭窗口不会自动结束协议，协议状态将在数据库中保留。\n' +
+        '你可以在系统托盘中找到 Protocol，随时重新打开。\n\n' +
+        '确定要隐藏窗口到托盘吗？',
+        { title: 'Protocol', kind: 'warning' },
+      );
+      if (!confirmed) return;
     }
   } catch {
-    // If DB calls fail, allow the close to proceed
+    // If DB calls fail, still allow hiding to tray
   }
+
+  // Defer hide with setTimeout to avoid conflicting with the close event processing
+  setTimeout(() => {
+    appWindow.hide();
+  }, 0);
 });
+
+void _closeUnlisten;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
