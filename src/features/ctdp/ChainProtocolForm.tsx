@@ -6,7 +6,7 @@ import {
   MAIN_TRIGGER_PRESETS,
 } from './protocolOptions';
 
-const CUSTOM_PRESET = '自定义';
+const CUSTOM_PRESET = '自定义 ✏️';
 
 export interface ChainProtocolFormValues {
   name: string;
