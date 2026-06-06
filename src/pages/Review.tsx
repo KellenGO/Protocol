@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { getChainReviewStats, getFailureDebugSummary, getPrecedentReviewList } from '../lib/db';
 import { formatProtocolDateTime } from '../lib/protocolEvents';
 import type { ChainReviewStats, FailureDebugSummary, PrecedentReviewItem } from '../types';
@@ -10,7 +10,11 @@ const CHART_COLORS = {
   completed: '#6ba882',
   failed: '#b8544a',
   precedent: '#df9a3c',
-  fulfilled: '#6ba882',
+  fulfilled: '#7fb39a',
+};
+
+type DonutStyle = CSSProperties & {
+  '--review-donut-fill': string;
 };
 
 interface DonutDataItem {
@@ -195,6 +199,64 @@ function riskLabel(tone: ChainDerivedStats['riskTone']): string {
   return '稳定';
 }
 
+function buildDonutFill(data: DonutDataItem[]): string {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  if (total <= 0) return 'conic-gradient(#252528 0deg 360deg)';
+
+  const gap = data.length > 1 ? 1.6 : 0;
+  let cursor = 0;
+  const segments = data.flatMap((item) => {
+    const degrees = (item.value / total) * 360;
+    const end = cursor + degrees;
+    const separator = Math.min(gap, degrees * 0.35);
+    const colorEnd = end - separator;
+    const color = CHART_COLORS[item.colorKey];
+    const part =
+      separator > 0
+        ? [`${color} ${cursor.toFixed(2)}deg ${colorEnd.toFixed(2)}deg`, `rgba(11, 11, 13, 0.82) ${colorEnd.toFixed(2)}deg ${end.toFixed(2)}deg`]
+        : [`${color} ${cursor.toFixed(2)}deg ${end.toFixed(2)}deg`];
+    cursor = end;
+    return part;
+  });
+
+  return `conic-gradient(${segments.join(', ')})`;
+}
+
+function ReviewDonut({
+  data,
+  total,
+  label,
+}: {
+  data: DonutDataItem[];
+  total: number;
+  label: string;
+}) {
+  const hasEvents = data.length > 0;
+  const style: DonutStyle = {
+    '--review-donut-fill': buildDonutFill(data),
+  };
+  const distribution = hasEvents
+    ? data.map((item) => `${item.name} ${item.value}`).join('，')
+    : '暂无事件';
+
+  return (
+    <div className="review-chain-donut">
+      <div
+        className={`review-donut-ring ${hasEvents ? '' : 'review-donut-empty'}`}
+        style={style}
+        role="img"
+        aria-label={`${label} 事件分布：${distribution}，总事件 ${total}`}
+        title={distribution}
+      >
+        <span className="review-donut-total">
+          <strong>{total}</strong>
+          <span>总事件</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function deriveChainStats(c: ChainReviewStats): ChainDerivedStats {
   const mainSuccess = c.completed_count;
   const mainFailures = c.failed_reset_count + c.failed_precedent_count;
@@ -366,9 +428,6 @@ function ChainsReview({
       <div className="review-chain-list">
         {sortedStats.map((item) => {
           const c = item.chain;
-          const chartData: DonutDataItem[] =
-            item.donutData.length > 0 ? item.donutData : [{ name: '暂无事件', value: 1, colorKey: 'completed' }];
-          const hasChartEvents = item.donutData.length > 0;
 
           return (
             <div key={c.chain_id} className="review-chain-card">
@@ -392,40 +451,7 @@ function ChainsReview({
               </div>
 
               <div className="review-chain-body">
-                <div className="review-chain-donut">
-                  <PieChart width={120} height={120}>
-                    <Pie
-                      data={chartData}
-                      cx={60}
-                      cy={60}
-                      innerRadius={28}
-                      outerRadius={52}
-                      paddingAngle={0}
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      {chartData.map((entry, i) => (
-                        <Cell key={i} fill={hasChartEvents ? CHART_COLORS[entry.colorKey] : '#252528'} />
-                      ))}
-                    </Pie>
-                    {hasChartEvents && (
-                      <Tooltip
-                        contentStyle={{
-                          background: '#131316',
-                          border: '1px solid #252528',
-                          borderRadius: 6,
-                          fontSize: 12,
-                          color: '#f0ede6',
-                        }}
-                        formatter={(value, name) => [`${value} 次`, name]}
-                      />
-                    )}
-                  </PieChart>
-                  <span className="review-donut-total">
-                    <strong>{item.totalActions}</strong>
-                    <span>总事件</span>
-                  </span>
-                </div>
+                <ReviewDonut data={item.donutData} total={item.totalActions} label={c.chain_name} />
 
                 <div className="review-chart-legend" aria-label={`${c.chain_name} 事件分布`}>
                   <ReviewLegendItem color="completed" label="主链完成" value={item.mainSuccess} />

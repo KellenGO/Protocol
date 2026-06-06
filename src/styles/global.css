@@ -2750,43 +2750,93 @@ textarea,
 .review-chain-body {
   display: flex;
   align-items: flex-start;
-  gap: 22px;
+  gap: 24px;
 }
 
 .review-chain-donut {
   position: relative;
   flex-shrink: 0;
-  width: 120px;
-  height: 120px;
+  width: 156px;
+  height: 156px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(240, 237, 230, 0.04) 0 44%, transparent 45%),
+    linear-gradient(145deg, rgba(240, 237, 230, 0.05), rgba(11, 11, 13, 0));
+}
+
+.review-donut-ring {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--review-donut-fill);
+  box-shadow:
+    inset 0 0 0 1px rgba(240, 237, 230, 0.08),
+    inset 0 -16px 28px rgba(0, 0, 0, 0.24),
+    0 12px 28px rgba(0, 0, 0, 0.26);
+  overflow: hidden;
+}
+
+.review-donut-ring::before {
+  content: '';
+  position: absolute;
+  inset: 38px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(240, 237, 230, 0.06), transparent 34%),
+    linear-gradient(180deg, #18181c 0%, #0d0d10 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(240, 237, 230, 0.07),
+    0 0 0 8px rgba(11, 11, 13, 0.5);
+}
+
+.review-donut-ring::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 36% 24%, rgba(255, 255, 255, 0.14), transparent 24%),
+    linear-gradient(150deg, rgba(255, 255, 255, 0.08), transparent 42%, rgba(0, 0, 0, 0.16));
+  pointer-events: none;
+}
+
+.review-donut-empty {
+  opacity: 0.74;
 }
 
 .review-donut-total {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  width: 66px;
+  height: 66px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  border-radius: 50%;
   font-family: var(--font-display);
   color: var(--text-primary);
   pointer-events: none;
-  flex-direction: column;
-  gap: 1px;
+  transform: translateY(-1px);
 }
 
 .review-donut-total strong {
-  font-size: 22px;
+  display: block;
+  font-size: 24px;
   line-height: 1;
+  font-weight: 700;
 }
 
 .review-donut-total span {
   font-size: 10px;
   color: var(--text-muted);
-  line-height: 1.2;
+  line-height: 1.1;
+  margin-top: 5px;
+  white-space: nowrap;
 }
 
 .review-chart-legend {
@@ -3051,7 +3101,7 @@ textarea,
 
   .review-chain-body {
     display: grid;
-    grid-template-columns: 120px minmax(120px, 160px) minmax(0, 1fr);
+    grid-template-columns: 156px minmax(120px, 160px) minmax(0, 1fr);
   }
 
   .review-chain-metrics {
@@ -3072,6 +3122,10 @@ textarea,
 
   .review-chain-body {
     align-items: stretch;
+  }
+
+  .review-chain-donut {
+    align-self: center;
   }
 
   .review-chain-status-row {
