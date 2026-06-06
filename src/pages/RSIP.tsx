@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   activateRsipFormula,
   archiveRsipGoal,
@@ -11,12 +11,10 @@ import {
   getFormulaEvents,
   getFailurePaths,
   getRsipGoals,
-  getRsipFormulaReview,
   getRsipFormulas,
-  updateRsipFormula,
 } from '../lib/db';
 import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
-import type { FailurePathNode, FormulaEvent, FormulaReview, RsipFailurePath, RsipFormula, RsipGoal } from '../types';
+import type { FailurePathNode, FormulaEvent, RsipFailurePath, RsipFormula, RsipGoal } from '../types';
 
 interface FormulaNode extends RsipFormula {
   children: FormulaNode[];
@@ -44,7 +42,6 @@ function buildTree(formulas: RsipFormula[]): FormulaNode[] {
 }
 
 export default function RSIP() {
-  const [searchParams] = useSearchParams();
   const [formulas, setFormulas] = useState<RsipFormula[]>([]);
   const [goals, setGoals] = useState<RsipGoal[]>([]);
   const [goalPaths, setGoalPaths] = useState<RsipFailurePath[]>([]);
@@ -56,13 +53,6 @@ export default function RSIP() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
   const [archivingGoalId, setArchivingGoalId] = useState<number | null>(null);
-  const [review, setReview] = useState<FormulaReview | null>(null);
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const [reviewTitle, setReviewTitle] = useState('');
-  const [reviewDescription, setReviewDescription] = useState('');
-  const [deactivationNote, setDeactivationNote] = useState('');
-  const [reviewError, setReviewError] = useState('');
-  const [savingReview, setSavingReview] = useState(false);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -76,11 +66,6 @@ export default function RSIP() {
   const goalFormulas = selectedGoalId
     ? formulas.filter((formula) => formula.goal_id === selectedGoalId)
     : [];
-  const reviewChanged = review
-    ? reviewTitle.trim() !== review.formula.title ||
-      reviewDescription.trim() !== review.formula.description
-    : false;
-
   async function reload() {
     const [nextFormulas, nextEvents, nextGoals] = await Promise.all([
       getRsipFormulas(),
@@ -92,33 +77,11 @@ export default function RSIP() {
     setGoals(nextGoals);
   }
 
-  async function loadReview(id: number) {
-    setReviewLoading(true);
-    setError('');
-    try {
-      const nextReview = await getRsipFormulaReview(id);
-      setReview(nextReview);
-      setReviewTitle(nextReview.formula.title);
-      setReviewDescription(nextReview.formula.description);
-      setDeactivationNote('');
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setReviewLoading(false);
-    }
-  }
-
   useEffect(() => {
     reload()
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    const formulaId = Number(searchParams.get('formula'));
-    if (!Number.isFinite(formulaId) || formulaId <= 0) return;
-    loadReview(formulaId);
-  }, [searchParams]);
 
   async function handleCreate() {
     if (!title.trim()) {
@@ -150,7 +113,6 @@ export default function RSIP() {
     try {
       await activateRsipFormula(id);
       await reload();
-      if (review?.formula.id === id) await loadReview(id);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -162,37 +124,12 @@ export default function RSIP() {
     setWorkingId(id);
     setError('');
     try {
-      await deactivateRsipFormula(id, review?.formula.id === id ? deactivationNote : undefined);
+      await deactivateRsipFormula(id);
       await reload();
-      if (review?.formula.id === id) await loadReview(id);
     } catch (err) {
       setError(String(err));
     } finally {
       setWorkingId(null);
-    }
-  }
-
-  async function handleSaveReview() {
-    if (!review) return;
-    if (!reviewTitle.trim()) {
-      setReviewError('定式标题不能为空');
-      return;
-    }
-    setSavingReview(true);
-    setReviewError('');
-    try {
-      const updated = await updateRsipFormula(review.formula.id, {
-        title: reviewTitle,
-        description: reviewDescription,
-      });
-      setReview({ ...review, formula: updated });
-      setReviewTitle(updated.title);
-      setReviewDescription(updated.description);
-      await reload();
-    } catch (err) {
-      setReviewError(String(err));
-    } finally {
-      setSavingReview(false);
     }
   }
 
@@ -224,12 +161,11 @@ export default function RSIP() {
     }
   }
 
-  async function handleWizardComplete(formula: RsipFormula, goalId: number) {
+  async function handleWizardComplete(_formula: RsipFormula, goalId: number) {
     setWizardOpen(false);
     setSelectedGoalId(goalId);
     await reload();
     setViewMode('tree');
-    await loadReview(formula.id);
   }
 
   return (
@@ -328,7 +264,6 @@ export default function RSIP() {
                   depth={0}
                   workingId={workingId}
                   onAddChild={(id) => setParentId(id)}
-                  onReview={loadReview}
                   onActivate={handleActivate}
                   onDeactivate={handleDeactivate}
                 />
@@ -338,21 +273,6 @@ export default function RSIP() {
         </section>
 
         <aside className="rsip-side-panel">
-          <RsipReviewPanel
-            review={review}
-            loading={reviewLoading}
-            title={reviewTitle}
-            description={reviewDescription}
-            deactivationNote={deactivationNote}
-            error={reviewError}
-            saving={savingReview}
-            canSave={reviewChanged && Boolean(reviewTitle.trim())}
-            setTitle={setReviewTitle}
-            setDescription={setReviewDescription}
-            setDeactivationNote={setDeactivationNote}
-            onSave={handleSaveReview}
-          />
-
           <section className="rsip-create-card">
             <h3>{parentId ? '创建子定式' : '创建根定式'}</h3>
             {parentId && (
@@ -834,7 +754,6 @@ function FormulaTreeNode({
   depth,
   workingId,
   onAddChild,
-  onReview,
   onActivate,
   onDeactivate,
 }: {
@@ -842,10 +761,10 @@ function FormulaTreeNode({
   depth: number;
   workingId: number | null;
   onAddChild: (id: number) => void;
-  onReview: (id: number) => void;
   onActivate: (id: number) => void;
   onDeactivate: (id: number) => void;
 }) {
+  const navigate = useNavigate();
   const activeChildren = countActive(node.children);
   const isWorking = workingId === node.id;
 
@@ -867,7 +786,10 @@ function FormulaTreeNode({
           </div>
         </div>
         <div className="formula-node-actions">
-          <button className="btn btn-secondary" onClick={() => onReview(node.id)}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => navigate(`/rsip-review?formula=${node.id}`)}
+          >
             复盘
           </button>
           <button className="btn btn-secondary" onClick={() => onAddChild(node.id)} aria-label={`为定式 ${node.title} 添加子定式`}>
@@ -901,124 +823,10 @@ function FormulaTreeNode({
           depth={depth + 1}
           workingId={workingId}
           onAddChild={onAddChild}
-          onReview={onReview}
           onActivate={onActivate}
           onDeactivate={onDeactivate}
         />
       ))}
-    </div>
-  );
-}
-
-function RsipReviewPanel({
-  review,
-  loading,
-  title,
-  description,
-  deactivationNote,
-  error,
-  saving,
-  canSave,
-  setTitle,
-  setDescription,
-  setDeactivationNote,
-  onSave,
-}: {
-  review: FormulaReview | null;
-  loading: boolean;
-  title: string;
-  description: string;
-  deactivationNote: string;
-  error: string;
-  saving: boolean;
-  canSave: boolean;
-  setTitle: (value: string) => void;
-  setDescription: (value: string) => void;
-  setDeactivationNote: (value: string) => void;
-  onSave: () => void;
-}) {
-  return (
-    <section className="rsip-review-card" aria-labelledby="rsip-review-heading">
-      <h3 id="rsip-review-heading">定式复盘</h3>
-      {loading ? (
-        <p className="placeholder-text" role="status" aria-live="polite">复盘加载中...</p>
-      ) : !review ? (
-        <p className="placeholder-text">在定式树中选择一个定式进行复盘。</p>
-      ) : (
-        <>
-          <div className="rsip-review-head">
-            <span className={`formula-status status-${review.formula.status}`}>
-              {review.formula.status === 'active' ? '点亮' : '未点亮'}
-            </span>
-            <strong>{review.formula.title}</strong>
-          </div>
-          <div className="rsip-edit-fields">
-            <label className="form-field">
-              <span>定式标题</span>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} />
-            </label>
-            <label className="form-field">
-              <span>执行说明</span>
-              <textarea
-                rows={3}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="写清触发条件、完成标准和例外边界"
-              />
-            </label>
-            {error && <p className="form-error" role="alert">{error}</p>}
-            <button className="btn btn-primary" disabled={saving || !canSave} onClick={onSave}>
-              {saving ? '保存中...' : '保存定式'}
-            </button>
-          </div>
-          <div className="rsip-review-grid">
-            <ReviewMetric label="创建" value={formatProtocolDateTime(review.formula.created_at)} />
-            <ReviewMetric label="点亮" value={review.formula.activated_at ? formatProtocolDateTime(review.formula.activated_at) : '-'} />
-            <ReviewMetric label="熄灭" value={review.formula.deactivated_at ? formatProtocolDateTime(review.formula.deactivated_at) : '-'} />
-            <ReviewMetric label="依赖子定式" value={`${review.active_child_count}/${review.child_count} active`} />
-            <ReviewMetric label="回滚影响" value={`${review.rollback_event_count} 次`} />
-          </div>
-          <div className="rsip-review-note">
-            <span>最近熄灭裁定</span>
-            <p>{review.latest_deactivation_note || '暂无熄灭备注'}</p>
-          </div>
-          <label className="form-field rsip-deactivation-note">
-            <span>下次熄灭备注</span>
-            <textarea
-              rows={3}
-              value={deactivationNote}
-              onChange={(e) => setDeactivationNote(e.target.value)}
-              placeholder="例如：父定式失稳、环境变化、完成条件过高"
-            />
-          </label>
-          <div className="formula-events compact-events">
-            {review.events.length === 0 ? (
-              <p className="placeholder-text" aria-live="polite">暂无事件</p>
-            ) : (
-              review.events.map((event) => (
-                <div key={event.id} className="formula-event">
-                  <div className="formula-event-main">
-                    <span className={`formula-event-type event-${event.event_type}`}>
-                      {formulaEventLabel(event.event_type)}
-                    </span>
-                  </div>
-                  <span className="formula-event-time">{formatProtocolDateTime(event.created_at)}</span>
-                  {event.note && <p className="formula-event-note">{event.note}</p>}
-                </div>
-              ))
-            )}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-function ReviewMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rsip-review-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }
