@@ -54,6 +54,7 @@ export default function RSIP() {
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
   const [archivingGoalId, setArchivingGoalId] = useState<number | null>(null);
 
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [parentId, setParentId] = useState<number | null>(null);
@@ -99,6 +100,7 @@ export default function RSIP() {
       setTitle('');
       setDescription('');
       setParentId(null);
+      setShowCreateForm(false);
       await reload();
     } catch (err) {
       setFormError(String(err));
@@ -170,60 +172,108 @@ export default function RSIP() {
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
+      <div className="rsip-header-bar">
+        <div className="rsip-header-left">
           <h2>RSIP 定式树</h2>
           <p className="page-subtitle">
             用低阻力定式递归改善生活稳态；父节点熄灭时，active 子节点会同步回滚。
           </p>
         </div>
+        <div className="rsip-header-right">
+          <div className="rsip-view-toggle" role="tablist" aria-label="RSIP view">
+            <button
+              type="button"
+              className={viewMode === 'tree' ? 'active' : ''}
+              onClick={() => setViewMode('tree')}
+              role="tab"
+              aria-selected={viewMode === 'tree'}
+            >
+              定式树
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'goals' ? 'active' : ''}
+              onClick={() => setViewMode('goals')}
+              role="tab"
+              aria-selected={viewMode === 'goals'}
+            >
+              目标
+            </button>
+          </div>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setShowCreateForm((prev) => !prev);
+              setParentId(null);
+            }}
+          >
+            + 创建定式
+          </button>
+          <button className="btn btn-primary" onClick={() => setWizardOpen(true)}>
+            新建目标转译
+          </button>
+        </div>
       </div>
 
-      <div className="rsip-header-actions">
-        <div className="rsip-view-toggle" role="tablist" aria-label="RSIP view">
-          <button
-            type="button"
-            className={viewMode === 'tree' ? 'active' : ''}
-            onClick={() => setViewMode('tree')}
-            role="tab"
-            aria-selected={viewMode === 'tree'}
-          >
-            定式树
-          </button>
-          <button
-            type="button"
-            className={viewMode === 'goals' ? 'active' : ''}
-            onClick={() => setViewMode('goals')}
-            role="tab"
-            aria-selected={viewMode === 'goals'}
-          >
-            目标
-          </button>
-        </div>
-        <button className="btn btn-secondary" onClick={() => setViewMode('goals')}>
-          查看目标
-        </button>
-        <button className="btn btn-primary" onClick={() => setWizardOpen(true)}>
-          新建目标转译
-        </button>
-      </div>
+      {showCreateForm && (
+        <section className="rsip-create-form">
+          <h3>{parentId ? '创建子定式' : '创建根定式'}</h3>
+          {parentId && (
+            <p className="selected-parent">
+              父定式：{formulas.find((f) => f.id === parentId)?.title ?? `#${parentId}`}
+              <button className="link-button" onClick={() => setParentId(null)}>
+                改为根定式
+              </button>
+            </p>
+          )}
 
-      <div className="rsip-summary-grid">
-        <div className="stat-card">
-          <span className="stat-label">定式总数</span>
-          <span className="stat-value">{formulas.length}</span>
+          <label className="form-field">
+            <span>定式标题</span>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setFormError('');
+              }}
+              placeholder="例如：饭后 10 分钟内洗碗"
+            />
+          </label>
+
+          <label className="form-field">
+            <span>执行说明</span>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="写清触发条件、完成标准和例外边界"
+              rows={4}
+            />
+          </label>
+
+          {formError && <p className="form-error" role="alert">{formError}</p>}
+
+          <button className="btn btn-primary" disabled={creating} onClick={handleCreate}>
+            {creating ? '创建中…' : '写入定式树'}
+          </button>
+        </section>
+      )}
+
+      <div className="rsip-stats-bar">
+        <div className="rsip-stat-item">
+          <strong>{formulas.length}</strong>
+          <span>定式总数</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">已点亮</span>
-          <span className="stat-value">{activeCount}</span>
+        <div className="rsip-stat-item positive">
+          <strong>{activeCount}</strong>
+          <span>已点亮</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">未点亮</span>
-          <span className="stat-value">{formulas.length - activeCount}</span>
+        <div className="rsip-stat-item muted">
+          <strong>{formulas.length - activeCount}</strong>
+          <span>未点亮</span>
         </div>
-        <div className="stat-card">
-          <span className="stat-label">Goals</span>
-          <span className="stat-value">{goals.length}</span>
+        <div className="rsip-stat-item">
+          <strong>{goals.length}</strong>
+          <span>Goals</span>
         </div>
       </div>
 
@@ -240,7 +290,7 @@ export default function RSIP() {
       )}
 
       {viewMode === 'tree' ? (
-      <div className="rsip-layout">
+      <div className="rsip-main-layout">
         <section className="rsip-tree-panel">
           <div className="section-header">
             <h3>定式树</h3>
@@ -263,7 +313,10 @@ export default function RSIP() {
                   node={node}
                   depth={0}
                   workingId={workingId}
-                  onAddChild={(id) => setParentId(id)}
+                  onAddChild={(id) => {
+                    setParentId(id);
+                    setShowCreateForm(true);
+                  }}
                   onActivate={handleActivate}
                   onDeactivate={handleDeactivate}
                 />
@@ -272,69 +325,26 @@ export default function RSIP() {
           )}
         </section>
 
-        <aside className="rsip-side-panel">
-          <section className="rsip-create-card">
-            <h3>{parentId ? '创建子定式' : '创建根定式'}</h3>
-            {parentId && (
-              <p className="selected-parent">
-                父定式：{formulas.find((f) => f.id === parentId)?.title ?? `#${parentId}`}
-                <button className="link-button" onClick={() => setParentId(null)}>
-                  改为根定式
-                </button>
-              </p>
-            )}
-
-            <label className="form-field">
-              <span>定式标题</span>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                  setFormError('');
-                }}
-                placeholder="例如：饭后 10 分钟内洗碗"
-              />
-            </label>
-
-            <label className="form-field">
-              <span>执行说明</span>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="写清触发条件、完成标准和例外边界"
-                rows={4}
-              />
-            </label>
-
-            {formError && <p className="form-error" role="alert">{formError}</p>}
-
-            <button className="btn btn-primary" disabled={creating} onClick={handleCreate}>
-              {creating ? '创建中…' : '写入定式树'}
-            </button>
-          </section>
-
-          <section className="rsip-events-card">
+        <aside className="rsip-events-panel">
+          <div className="rsip-events-header">
             <h3>最近 RSIP 事件</h3>
-            {events.length === 0 ? (
-              <p className="placeholder-text" aria-live="polite">暂无定式事件</p>
-            ) : (
-              <div className="formula-events">
-                {events.map((event) => (
-                  <div key={event.id} className="formula-event">
-                    <div className="formula-event-main">
-                      <span className={`formula-event-type event-${event.event_type}`}>
-                        {formulaEventLabel(event.event_type)}
-                      </span>
-                      <span className="formula-event-title">{event.formula_title}</span>
-                    </div>
-                    <span className="formula-event-time">{formatProtocolDateTime(event.created_at)}</span>
-                    {event.note && <p className="formula-event-note">{event.note}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+            <span className="section-hint">{events.length} 条</span>
+          </div>
+          {events.length === 0 ? (
+            <p className="placeholder-text" aria-live="polite">暂无定式事件</p>
+          ) : (
+            <div className="rsip-events-compact">
+              {events.slice(0, 6).map((event) => (
+                <div key={event.id} className="rsip-event-row">
+                  <span className={`formula-event-type event-${event.event_type}`}>
+                    {formulaEventLabel(event.event_type)}
+                  </span>
+                  <span className="rsip-event-row-title">{event.formula_title}</span>
+                  <span className="rsip-event-row-time">{formatProtocolDateTime(event.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </aside>
       </div>
       ) : (
