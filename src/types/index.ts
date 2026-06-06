@@ -178,6 +178,46 @@ export interface RsipFormula {
   updated_at: string;
   activated_at: string | null;
   deactivated_at: string | null;
+  goal_id: number | null;
+  failure_path_id: number | null;
+  intervention_node_id: string | null;
+  dependency_note: string | null;
+}
+
+export interface FailurePathNode {
+  id: string;
+  text: string;
+}
+
+export interface RsipGoal {
+  id: number;
+  title: string;
+  description: string | null;
+  status: 'active' | 'archived';
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+  formula_count: number;
+  failure_path_count: number;
+}
+
+export interface RsipFailurePath {
+  id: number;
+  goal_id: number;
+  title: string;
+  nodes_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoalFormulaDraft {
+  goalId: number;
+  failurePathId: number;
+  interventionNodeId: string;
+  title: string;
+  description: string;
+  parentId?: number | null;
+  dependencyNote?: string | null;
 }
 
 export interface FormulaEvent {
@@ -243,6 +283,8 @@ export interface DatabaseInfo {
     precedents: number;
     rsip_formulas: number;
     formula_events: number;
+    rsip_goals: number;
+    rsip_failure_paths: number;
   };
 }
 
@@ -258,6 +300,8 @@ export interface BackupFileInfo {
     app_settings: number | string;
     rsip_formulas: number | string;
     formula_events: number | string;
+    rsip_goals: number | string;
+    rsip_failure_paths: number | string;
   };
 }
 
@@ -272,6 +316,8 @@ export interface HistoryExport {
     reservation_sessions: Record<string, string>[];
     precedents: Record<string, string>[];
     formula_events: Record<string, string>[];
+    rsip_goals: Record<string, string>[];
+    rsip_failure_paths: Record<string, string>[];
     app_settings: Record<string, string>[];
   };
 }

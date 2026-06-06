@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## v0.4.0 (RSIP Goal Translation)
+
+**Release date:** 2026-06-06
+
+**Status:** Manual RSIP goal translation slice added on top of the complete offline desktop v0.3.x baseline.
+
+### Added
+
+- Added `rsip_goals` for broad RSIP directions that are not directly executable.
+- Added `rsip_failure_paths` for ordered behavior paths under a goal.
+- Extended `rsip_formulas` with nullable `goal_id`, `failure_path_id`, `intervention_node_id`, and `dependency_note`.
+- Added RSIP page goal view with active goal cards, formula counts, failure-path counts, linked paths, and linked formulas.
+- Added a four-step goal translation wizard: goal -> failure path -> intervention point -> formula.
+- Added backend commands and TypeScript wrappers for goals, failure paths, and goal-linked formula creation.
+- Added database-info, backup-inspection, and history-export awareness for the new RSIP tables.
+
+### Preserved
+
+- Existing RSIP formula tree, activation, deactivation, recursive rollback, and review behavior.
+- Existing CTDP main-chain, auxiliary-chain, precedent-library, History, Review, Settings, and Data Management behavior.
+- Existing formulas remain valid with empty goal metadata.
+
+### Still out of scope
+
+- AI-generated suggestions.
+- Cloud sync, accounts, mobile, and social/community features.
+- Large UI framework changes.
+- CTDP or auxiliary-chain business-logic rewrites.
+
+---
+
 本文件记录 Protocol 各版本的功能变更、已知限制与后续方向。
 
 ---

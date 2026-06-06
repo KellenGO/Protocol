@@ -117,6 +117,26 @@ impl Database {
                 FOREIGN KEY (parent_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS rsip_goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                archived_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS rsip_failure_paths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                goal_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                nodes_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (goal_id) REFERENCES rsip_goals(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS formula_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 formula_id INTEGER NOT NULL,
@@ -135,6 +155,7 @@ impl Database {
 
         migrate_precedents_to_core_schema(&conn)?;
         migrate_protocol_config_schema(&conn)?;
+        migrate_rsip_goal_translation_schema(&conn)?;
 
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -240,6 +261,14 @@ fn migrate_protocol_config_schema(conn: &Connection) -> SqliteResult<()> {
         add_column_if_missing(conn, table, "debug_note", "TEXT")?;
     }
 
+    Ok(())
+}
+
+fn migrate_rsip_goal_translation_schema(conn: &Connection) -> SqliteResult<()> {
+    add_column_if_missing(conn, "rsip_formulas", "goal_id", "INTEGER")?;
+    add_column_if_missing(conn, "rsip_formulas", "failure_path_id", "INTEGER")?;
+    add_column_if_missing(conn, "rsip_formulas", "intervention_node_id", "TEXT")?;
+    add_column_if_missing(conn, "rsip_formulas", "dependency_note", "TEXT")?;
     Ok(())
 }
 

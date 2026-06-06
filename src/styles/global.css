@@ -1932,6 +1932,40 @@ textarea,
   margin-bottom: 24px;
 }
 
+.rsip-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin: -8px 0 20px;
+  flex-wrap: wrap;
+}
+
+.rsip-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.rsip-view-toggle button {
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px 11px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rsip-view-toggle button.active {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
 .rsip-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
@@ -1940,6 +1974,9 @@ textarea,
 }
 
 .rsip-tree-panel,
+.rsip-goals-panel,
+.rsip-goal-detail,
+.goal-wizard,
 .rsip-create-card,
 .rsip-events-card,
 .rsip-review-card {
@@ -1953,6 +1990,177 @@ textarea,
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.rsip-goal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 24px;
+  align-items: start;
+}
+
+.rsip-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.rsip-goal-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 188px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.rsip-goal-card.selected {
+  border-color: var(--border-default);
+}
+
+.rsip-goal-card h4 {
+  margin: 10px 0 6px;
+  font-size: 16px;
+  font-family: var(--font-display);
+}
+
+.rsip-goal-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.rsip-goal-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.goal-detail-block {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+}
+
+.goal-detail-block > span {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.failure-path-card {
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.failure-path-card:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.failure-path-card strong {
+  font-size: 13px;
+}
+
+.failure-path-card ol {
+  margin: 8px 0 0 18px;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.goal-wizard {
+  margin-bottom: 20px;
+}
+
+.goal-wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.goal-wizard-steps span {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.goal-wizard-steps span.active {
+  border-color: var(--border-default);
+  color: var(--text-primary);
+  background: var(--bg-base);
+}
+
+.goal-wizard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.failure-node-list {
+  display: grid;
+  gap: 8px;
+}
+
+.intervention-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.intervention-option.selected {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+.intervention-option span {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.dependency-guidance {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.goal-wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .section-header {
@@ -2247,7 +2455,8 @@ textarea,
 }
 
 @media (max-width: 980px) {
-  .rsip-layout {
+  .rsip-layout,
+  .rsip-goal-layout {
     grid-template-columns: 1fr;
   }
 }

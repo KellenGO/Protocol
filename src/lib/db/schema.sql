@@ -84,7 +84,31 @@ CREATE TABLE IF NOT EXISTS rsip_formulas (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     activated_at TEXT,
     deactivated_at TEXT,
+    goal_id INTEGER,
+    failure_path_id INTEGER,
+    intervention_node_id TEXT,
+    dependency_note TEXT,
     FOREIGN KEY (parent_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rsip_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    archived_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rsip_failure_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    nodes_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (goal_id) REFERENCES rsip_goals(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS formula_events (

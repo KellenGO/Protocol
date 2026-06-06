@@ -2,7 +2,7 @@
 
 ## Current Version
 
-Protocol is now in the post-V2-Gamma closure stage for auxiliary-chain adjudication, precedent-library maturity, and the first RSIP single-formula maintenance slice.
+Protocol is now in the post-V2-Gamma closure stage for auxiliary-chain adjudication, precedent-library maturity, RSIP single-formula maintenance, and the first RSIP goal translation slice.
 
 V2 Alpha has been accepted as the current baseline:
 - CTDP V1 is complete.
@@ -23,6 +23,7 @@ Current development priority:
 - Allow active precedents to be viewed, edited, and retired without deleting history.
 - Let RSIP review update a formula's title and execution description.
 - Let RSIP deactivation record a user-written note instead of relying only on a generic default.
+- Let RSIP translate a broad goal into a failure path, intervention point, and concrete formula without AI suggestions.
 - Keep Dashboard, Chain Detail, Chain List, History, and the global button aligned around active protocol state.
 
 ## Current Data Mapping
@@ -42,5 +43,7 @@ Failure debugging is lightweight. Focus sessions and reservation sessions store 
 Protocol should remain a restrained desktop protocol tool. It should not become a generic to-do app, a normal pomodoro timer, or a motivational gamification product.
 
 RSIP continues as the long-term stable-state module. V2 Gamma adds single-formula review so a user can inspect lifecycle, deactivation notes, rollback impact, and event history without turning RSIP into a graph-heavy module. The current maturity slice keeps that restrained shape and adds formula title/description editing plus custom deactivation notes.
+
+Protocol v0.4 adds manual RSIP goal translation. Goals are stored separately from formulas because a goal is a direction, not an executable protocol. Failure paths and selected intervention nodes give each generated formula its context, while the existing formula tree remains the executable RSIP structure.
 
 The current product boundary is the complete offline desktop version. AI suggestions, cloud sync, accounts, mobile apps, and community features remain outside the active scope.

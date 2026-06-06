@@ -53,6 +53,18 @@ Current development focuses on making the offline desktop version coherent enoug
 - Keep retired precedents in history while hiding them from active protocol boundaries.
 - Add the first RSIP maturity slice: edit a formula's title/description from the review panel and record a user-written deactivation note.
 
+## Completed Slice: Protocol v0.4 RSIP Goal Translation
+
+Protocol v0.4 adds the first goal translation layer for RSIP:
+
+- Add `rsip_goals` and `rsip_failure_paths`.
+- Extend `rsip_formulas` with nullable goal, failure-path, intervention-node, and dependency-note fields.
+- Keep old formulas valid when goal metadata is empty.
+- Add a four-step RSIP wizard: goal -> failure path -> intervention point -> formula.
+- Add a goal view that shows active goals, formula counts, failure-path counts, linked paths, and linked formulas.
+- Preserve the existing formula tree, activation, deactivation, recursive rollback, and single-formula review.
+- Keep AI suggestions, cloud sync, accounts, mobile, and large UI framework changes out of scope.
+
 ## Closure 1-4 Acceptance
 
 This closure is accepted when:

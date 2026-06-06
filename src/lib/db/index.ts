@@ -20,13 +20,16 @@ import type {
   GlobalActiveReservationSession,
   FormulaEvent,
   FormulaReview,
+  GoalFormulaDraft,
   HistoryExport,
   PrecedentReviewItem,
   ProtocolEvent,
   ProtocolPrecedent,
   ProtocolTimelineEvent,
   ResetHistoryResult,
+  RsipFailurePath,
   RsipFormula,
+  RsipGoal,
   RsipSummary,
 } from '../../types';
 
@@ -257,6 +260,65 @@ export async function createRsipFormula(params: {
 
 export async function getRsipFormulas(): Promise<RsipFormula[]> {
   return invoke('get_rsip_formulas');
+}
+
+export async function createRsipGoal(params: {
+  title: string;
+  description: string;
+}): Promise<RsipGoal> {
+  return invoke('create_rsip_goal', params);
+}
+
+export async function getRsipGoals(includeArchived = false): Promise<RsipGoal[]> {
+  return invoke('get_rsip_goals', { includeArchived });
+}
+
+export async function updateRsipGoal(
+  id: number,
+  params: {
+    title: string;
+    description: string;
+    status?: 'active' | 'archived';
+  },
+): Promise<RsipGoal> {
+  return invoke('update_rsip_goal', {
+    id,
+    title: params.title,
+    description: params.description,
+    status: params.status ?? null,
+  });
+}
+
+export async function archiveRsipGoal(id: number): Promise<RsipGoal> {
+  return invoke('archive_rsip_goal', { id });
+}
+
+export async function createFailurePath(params: {
+  goalId: number;
+  title: string;
+  nodes: string[];
+}): Promise<RsipFailurePath> {
+  return invoke('create_failure_path', params);
+}
+
+export async function getFailurePaths(goalId: number): Promise<RsipFailurePath[]> {
+  return invoke('get_failure_paths', { goalId });
+}
+
+export async function createFormulaFromGoal(params: GoalFormulaDraft): Promise<RsipFormula> {
+  return invoke('create_formula_from_goal', {
+    goalId: params.goalId,
+    failurePathId: params.failurePathId,
+    interventionNodeId: params.interventionNodeId,
+    title: params.title,
+    description: params.description,
+    parentId: params.parentId ?? null,
+    dependencyNote: params.dependencyNote ?? null,
+  });
+}
+
+export async function getFormulasByGoal(goalId: number): Promise<RsipFormula[]> {
+  return invoke('get_formulas_by_goal', { goalId });
 }
 
 export async function updateRsipFormula(

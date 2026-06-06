@@ -10,7 +10,7 @@ use tauri::tray::TrayIconBuilder;
 
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
-const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at";
+const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at, goal_id, failure_path_id, intervention_node_id, dependency_note";
 
 fn clean_option(value: Option<String>) -> String {
     value.unwrap_or_default().trim().to_string()
@@ -76,6 +76,35 @@ fn rsip_formula_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Va
         "updated_at": row.get::<_, String>(7)?,
         "activated_at": row.get::<_, Option<String>>(8)?,
         "deactivated_at": row.get::<_, Option<String>>(9)?,
+        "goal_id": row.get::<_, Option<i64>>(10)?,
+        "failure_path_id": row.get::<_, Option<i64>>(11)?,
+        "intervention_node_id": row.get::<_, Option<String>>(12)?,
+        "dependency_note": row.get::<_, Option<String>>(13)?,
+    }))
+}
+
+fn rsip_goal_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "title": row.get::<_, String>(1)?,
+        "description": row.get::<_, Option<String>>(2)?,
+        "status": row.get::<_, String>(3)?,
+        "created_at": row.get::<_, String>(4)?,
+        "updated_at": row.get::<_, String>(5)?,
+        "archived_at": row.get::<_, Option<String>>(6)?,
+        "formula_count": row.get::<_, i64>(7)?,
+        "failure_path_count": row.get::<_, i64>(8)?,
+    }))
+}
+
+fn rsip_failure_path_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "goal_id": row.get::<_, i64>(1)?,
+        "title": row.get::<_, String>(2)?,
+        "nodes_json": row.get::<_, String>(3)?,
+        "created_at": row.get::<_, String>(4)?,
+        "updated_at": row.get::<_, String>(5)?,
     }))
 }
 
@@ -185,6 +214,257 @@ fn clean_rsip_deactivation_note(note: Option<String>) -> String {
     } else {
         cleaned
     }
+}
+
+fn clean_rsip_goal_input(title: &str, description: &str) -> Result<(String, String), String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("goal title cannot be empty".into());
+    }
+    Ok((title, description.trim().to_string()))
+}
+
+fn failure_path_nodes_json(nodes: Vec<String>) -> Result<String, String> {
+    let nodes: Vec<serde_json::Value> = nodes
+        .into_iter()
+        .map(|node| node.trim().to_string())
+        .filter(|node| !node.is_empty())
+        .enumerate()
+        .map(|(index, text)| {
+            serde_json::json!({
+                "id": format!("node-{}", index + 1),
+                "text": text,
+            })
+        })
+        .collect();
+
+    if nodes.is_empty() {
+        return Err("failure path requires at least one behavior node".into());
+    }
+
+    serde_json::to_string(&nodes).map_err(|e| e.to_string())
+}
+
+fn clean_goal_formula_dependency(
+    parent_id: Option<i64>,
+    dependency_note: Option<String>,
+) -> Result<Option<String>, String> {
+    let cleaned = dependency_note.unwrap_or_default().trim().to_string();
+    if parent_id.is_some() && cleaned.is_empty() {
+        return Err("child formulas require a dependency note".into());
+    }
+    if cleaned.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(cleaned))
+    }
+}
+
+fn ensure_rsip_goal_exists(conn: &rusqlite::Connection, goal_id: i64) -> Result<(), String> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM rsip_goals WHERE id = ?1",
+            [goal_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if exists {
+        Ok(())
+    } else {
+        Err("goal does not exist".into())
+    }
+}
+
+fn ensure_failure_path_belongs_to_goal(
+    conn: &rusqlite::Connection,
+    failure_path_id: i64,
+    goal_id: i64,
+) -> Result<(), String> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM rsip_failure_paths WHERE id = ?1 AND goal_id = ?2",
+            rusqlite::params![failure_path_id, goal_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if exists {
+        Ok(())
+    } else {
+        Err("failure path does not belong to the goal".into())
+    }
+}
+
+fn next_rsip_formula_position(
+    conn: &rusqlite::Connection,
+    parent_id: Option<i64>,
+) -> Result<i64, String> {
+    if let Some(pid) = parent_id {
+        conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM rsip_formulas WHERE parent_id = ?1",
+            [pid],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM rsip_formulas WHERE parent_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+
+fn get_rsip_formula_json(
+    conn: &rusqlite::Connection,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    conn.query_row(
+        &format!("SELECT {} FROM rsip_formulas WHERE id = ?1", RSIP_FORMULA_FIELDS),
+        [id],
+        rsip_formula_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn get_rsip_goal_record(
+    conn: &rusqlite::Connection,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    conn.query_row(
+        "SELECT g.id, g.title, g.description, g.status, g.created_at, g.updated_at, g.archived_at,
+                COUNT(DISTINCT f.id) AS formula_count,
+                COUNT(DISTINCT p.id) AS failure_path_count
+         FROM rsip_goals g
+         LEFT JOIN rsip_formulas f ON f.goal_id = g.id
+         LEFT JOIN rsip_failure_paths p ON p.goal_id = g.id
+         WHERE g.id = ?1
+         GROUP BY g.id",
+        [id],
+        rsip_goal_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn insert_rsip_goal_record(
+    conn: &rusqlite::Connection,
+    title: &str,
+    description: &str,
+) -> Result<i64, String> {
+    let (title, description) = clean_rsip_goal_input(title, description)?;
+    conn.execute(
+        "INSERT INTO rsip_goals (title, description) VALUES (?1, ?2)",
+        rusqlite::params![title, description],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn insert_failure_path_record(
+    conn: &rusqlite::Connection,
+    goal_id: i64,
+    title: &str,
+    nodes: Vec<String>,
+) -> Result<i64, String> {
+    ensure_rsip_goal_exists(conn, goal_id)?;
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("failure path title cannot be empty".into());
+    }
+    let nodes_json = failure_path_nodes_json(nodes)?;
+    conn.execute(
+        "INSERT INTO rsip_failure_paths (goal_id, title, nodes_json) VALUES (?1, ?2, ?3)",
+        rusqlite::params![goal_id, title, nodes_json],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn insert_goal_formula_record(
+    conn: &rusqlite::Connection,
+    goal_id: i64,
+    failure_path_id: i64,
+    intervention_node_id: String,
+    title: String,
+    description: String,
+    parent_id: Option<i64>,
+    dependency_note: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_rsip_goal_exists(conn, goal_id)?;
+    ensure_failure_path_belongs_to_goal(conn, failure_path_id, goal_id)?;
+    if let Some(pid) = parent_id {
+        let parent_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM rsip_formulas WHERE id = ?1",
+                [pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !parent_exists {
+            return Err("parent formula does not exist".into());
+        }
+    }
+
+    let intervention_node_id = intervention_node_id.trim().to_string();
+    if intervention_node_id.is_empty() {
+        return Err("intervention node cannot be empty".into());
+    }
+
+    let (title, description) = clean_rsip_formula_edit(&title, &description)?;
+    let dependency_note = clean_goal_formula_dependency(parent_id, dependency_note)?;
+    let next_position = next_rsip_formula_position(conn, parent_id)?;
+
+    conn.execute(
+        "INSERT INTO rsip_formulas (
+            parent_id, title, description, position, goal_id, failure_path_id, intervention_node_id, dependency_note
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            parent_id,
+            title,
+            description,
+            next_position,
+            goal_id,
+            failure_path_id,
+            intervention_node_id,
+            dependency_note
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO formula_events (formula_id, event_type, note) VALUES (?1, 'created', ?2)",
+        rusqlite::params![id, "Formula created from goal translation"],
+    )
+    .map_err(|e| e.to_string())?;
+
+    get_rsip_formula_json(conn, id)
+}
+
+fn get_goal_formula_records(
+    conn: &rusqlite::Connection,
+    goal_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    ensure_rsip_goal_exists(conn, goal_id)?;
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {}
+             FROM rsip_formulas
+             WHERE goal_id = ?1
+             ORDER BY COALESCE(parent_id, 0), position, created_at",
+            RSIP_FORMULA_FIELDS
+        ))
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([goal_id], rsip_formula_json)
+        .map_err(|e| e.to_string())?;
+
+    let mut formulas = Vec::new();
+    for row in rows {
+        formulas.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(formulas)
 }
 
 fn get_auxiliary_confirmation_window_minutes(conn: &rusqlite::Connection) -> Result<i64, String> {
@@ -1641,6 +1921,192 @@ fn get_rsip_formulas(state: tauri::State<'_, Database>) -> Result<Vec<serde_json
 }
 
 #[tauri::command]
+fn create_rsip_goal(
+    state: tauri::State<'_, Database>,
+    title: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let id = insert_rsip_goal_record(&conn, &title, &description)?;
+    get_rsip_goal_record(&conn, id)
+}
+
+#[tauri::command]
+fn get_rsip_goals(
+    state: tauri::State<'_, Database>,
+    include_archived: Option<bool>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let include_archived = include_archived.unwrap_or(false);
+    let status_filter = if include_archived {
+        ""
+    } else {
+        "WHERE g.status = 'active'"
+    };
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT g.id, g.title, g.description, g.status, g.created_at, g.updated_at, g.archived_at,
+                    COUNT(DISTINCT f.id) AS formula_count,
+                    COUNT(DISTINCT p.id) AS failure_path_count
+             FROM rsip_goals g
+             LEFT JOIN rsip_formulas f ON f.goal_id = g.id
+             LEFT JOIN rsip_failure_paths p ON p.goal_id = g.id
+             {}
+             GROUP BY g.id
+             ORDER BY g.created_at DESC, g.id DESC",
+            status_filter
+        ))
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt.query_map([], rsip_goal_json).map_err(|e| e.to_string())?;
+    let mut goals = Vec::new();
+    for row in rows {
+        goals.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(goals)
+}
+
+#[tauri::command]
+fn update_rsip_goal(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    title: String,
+    description: String,
+    status: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let (title, description) = clean_rsip_goal_input(&title, &description)?;
+    let status = status.unwrap_or_else(|| "active".to_string());
+    if !matches!(status.as_str(), "active" | "archived") {
+        return Err("goal status must be active or archived".into());
+    }
+
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let rows = conn
+        .execute(
+            "UPDATE rsip_goals
+             SET title = ?2,
+                 description = ?3,
+                 status = ?4,
+                 updated_at = datetime('now'),
+                 archived_at = CASE
+                   WHEN ?4 = 'archived' AND archived_at IS NULL THEN datetime('now')
+                   WHEN ?4 = 'active' THEN NULL
+                   ELSE archived_at
+                 END
+             WHERE id = ?1",
+            rusqlite::params![id, title, description, status],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if rows == 0 {
+        return Err("goal does not exist".into());
+    }
+
+    get_rsip_goal_record(&conn, id)
+}
+
+#[tauri::command]
+fn archive_rsip_goal(
+    state: tauri::State<'_, Database>,
+    id: i64,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let rows = conn
+        .execute(
+            "UPDATE rsip_goals
+             SET status = 'archived',
+                 archived_at = COALESCE(archived_at, datetime('now')),
+                 updated_at = datetime('now')
+             WHERE id = ?1",
+            [id],
+        )
+        .map_err(|e| e.to_string())?;
+
+    if rows == 0 {
+        return Err("goal does not exist".into());
+    }
+
+    get_rsip_goal_record(&conn, id)
+}
+
+#[tauri::command]
+fn create_failure_path(
+    state: tauri::State<'_, Database>,
+    goal_id: i64,
+    title: String,
+    nodes: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let id = insert_failure_path_record(&conn, goal_id, &title, nodes)?;
+    conn.query_row(
+        "SELECT id, goal_id, title, nodes_json, created_at, updated_at
+         FROM rsip_failure_paths
+         WHERE id = ?1",
+        [id],
+        rsip_failure_path_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_failure_paths(
+    state: tauri::State<'_, Database>,
+    goal_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    ensure_rsip_goal_exists(&conn, goal_id)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, goal_id, title, nodes_json, created_at, updated_at
+             FROM rsip_failure_paths
+             WHERE goal_id = ?1
+             ORDER BY created_at DESC, id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([goal_id], rsip_failure_path_json)
+        .map_err(|e| e.to_string())?;
+    let mut paths = Vec::new();
+    for row in rows {
+        paths.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(paths)
+}
+
+#[tauri::command]
+fn create_formula_from_goal(
+    state: tauri::State<'_, Database>,
+    goal_id: i64,
+    failure_path_id: i64,
+    intervention_node_id: String,
+    title: String,
+    description: String,
+    parent_id: Option<i64>,
+    dependency_note: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    insert_goal_formula_record(
+        &conn,
+        goal_id,
+        failure_path_id,
+        intervention_node_id,
+        title,
+        description,
+        parent_id,
+        dependency_note,
+    )
+}
+
+#[tauri::command]
+fn get_formulas_by_goal(
+    state: tauri::State<'_, Database>,
+    goal_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_goal_formula_records(&conn, goal_id)
+}
+
+#[tauri::command]
 fn update_rsip_formula(
     state: tauri::State<'_, Database>,
     id: i64,
@@ -2380,7 +2846,12 @@ const REQUIRED_TABLES: &[&str] = &[
     "app_settings",
 ];
 
-const RSIP_TABLES: &[&str] = &["rsip_formulas", "formula_events"];
+const RSIP_TABLES: &[&str] = &[
+    "rsip_formulas",
+    "formula_events",
+    "rsip_goals",
+    "rsip_failure_paths",
+];
 
 fn table_exists(conn: &Connection, table: &str) -> bool {
     conn.query_row(
@@ -2590,6 +3061,12 @@ fn get_database_info(state: tauri::State<'_, Database>) -> Result<serde_json::Va
     let event_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM formula_events", [], |row| row.get(0))
         .unwrap_or(0);
+    let goal_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM rsip_goals", [], |row| row.get(0))
+        .unwrap_or(0);
+    let failure_path_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM rsip_failure_paths", [], |row| row.get(0))
+        .unwrap_or(0);
 
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -2605,7 +3082,9 @@ fn get_database_info(state: tauri::State<'_, Database>) -> Result<serde_json::Va
             "reservation_sessions": reservation_count,
             "precedents": precedent_count,
             "rsip_formulas": formula_count,
-            "formula_events": event_count
+            "formula_events": event_count,
+            "rsip_goals": goal_count,
+            "rsip_failure_paths": failure_path_count
         }
     }))
 }
@@ -2653,6 +3132,12 @@ fn export_history_json(state: tauri::State<'_, Database>) -> Result<serde_json::
     let formula_events = export_table(
         "SELECT id, formula_id, event_type, note, created_at FROM formula_events ORDER BY id",
     )?;
+    let rsip_goals = export_table(
+        "SELECT id, title, description, status, created_at, updated_at, archived_at FROM rsip_goals ORDER BY id",
+    )?;
+    let rsip_failure_paths = export_table(
+        "SELECT id, goal_id, title, nodes_json, created_at, updated_at FROM rsip_failure_paths ORDER BY id",
+    )?;
     let chains = export_table(
         "SELECT id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at FROM chains ORDER BY id",
     )?;
@@ -2675,6 +3160,8 @@ fn export_history_json(state: tauri::State<'_, Database>) -> Result<serde_json::
             "reservation_sessions": reservation_sessions,
             "precedents": precedents,
             "formula_events": formula_events,
+            "rsip_goals": rsip_goals,
+            "rsip_failure_paths": rsip_failure_paths,
             "app_settings": app_settings
         }
     }))
@@ -2822,6 +3309,14 @@ pub fn run() {
             get_recent_protocol_events,
             create_rsip_formula,
             get_rsip_formulas,
+            create_rsip_goal,
+            get_rsip_goals,
+            update_rsip_goal,
+            archive_rsip_goal,
+            create_failure_path,
+            get_failure_paths,
+            create_formula_from_goal,
+            get_formulas_by_goal,
             update_rsip_formula,
             activate_rsip_formula,
             deactivate_rsip_formula,
@@ -3056,6 +3551,143 @@ mod tests {
             clean_rsip_deactivation_note(Some("  ".to_string())),
             "用户裁定该定式当前熄灭".to_string()
         );
+    }
+
+    #[test]
+    fn rsip_goal_input_rejects_empty_title() {
+        assert!(clean_rsip_goal_input("  ", "sleep earlier").is_err());
+    }
+
+    #[test]
+    fn rsip_goal_input_trims_title_and_description() {
+        let cleaned =
+            clean_rsip_goal_input("  Sleep earlier  ", "  Reduce bedtime drift  ").unwrap();
+
+        assert_eq!(
+            cleaned,
+            (
+                "Sleep earlier".to_string(),
+                "Reduce bedtime drift".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn failure_path_nodes_json_preserves_ordered_nodes() {
+        let json = failure_path_nodes_json(vec![
+            "Shower done".to_string(),
+            "Lie down".to_string(),
+            "Pick up phone".to_string(),
+        ])
+        .unwrap();
+
+        assert!(json.contains("\"id\":\"node-1\""));
+        assert!(json.contains("\"text\":\"Shower done\""));
+        assert!(json.contains("\"id\":\"node-3\""));
+        assert!(json.contains("\"text\":\"Pick up phone\""));
+    }
+
+    #[test]
+    fn failure_path_nodes_json_rejects_blank_paths() {
+        assert!(failure_path_nodes_json(vec![" ".to_string(), "\t".to_string()]).is_err());
+    }
+
+    #[test]
+    fn child_formula_requires_dependency_note() {
+        assert!(clean_goal_formula_dependency(Some(1), Some("  ".to_string())).is_err());
+        assert_eq!(
+            clean_goal_formula_dependency(
+                Some(1),
+                Some("  parent failure destabilizes this  ".to_string())
+            )
+            .unwrap(),
+            Some("parent failure destabilizes this".to_string())
+        );
+        assert_eq!(clean_goal_formula_dependency(None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn goal_formula_rows_are_queryable_by_goal() {
+        let conn = rsip_goal_test_conn();
+        let goal_id = insert_rsip_goal_record(&conn, "Sleep earlier", "Reduce bedtime drift").unwrap();
+        let path_id = insert_failure_path_record(
+            &conn,
+            goal_id,
+            "Bedtime drift path",
+            vec!["Shower done".to_string(), "Pick up phone".to_string()],
+        )
+        .unwrap();
+
+        let formula = insert_goal_formula_record(
+            &conn,
+            goal_id,
+            path_id,
+            "node-2".to_string(),
+            "Phone stays off bed".to_string(),
+            "Before bed, put the phone on the desk charger".to_string(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let formulas = get_goal_formula_records(&conn, goal_id).unwrap();
+        assert_eq!(formulas.len(), 1);
+        assert_eq!(formulas[0]["id"], formula["id"]);
+        assert_eq!(formulas[0]["goal_id"].as_i64(), Some(goal_id));
+        assert_eq!(formulas[0]["intervention_node_id"].as_str(), Some("node-2"));
+    }
+
+    fn rsip_goal_test_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE rsip_goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                archived_at TEXT
+            );
+
+            CREATE TABLE rsip_failure_paths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                goal_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                nodes_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE rsip_formulas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'inactive',
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                activated_at TEXT,
+                deactivated_at TEXT,
+                goal_id INTEGER,
+                failure_path_id INTEGER,
+                intervention_node_id TEXT,
+                dependency_note TEXT
+            );
+
+            CREATE TABLE formula_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                formula_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            ",
+        )
+        .unwrap();
+        conn
     }
 
     fn reservation_guard_test_conn(
