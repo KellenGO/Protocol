@@ -128,7 +128,7 @@ export default function GlobalFocusButton() {
   const target =
     active.kind === 'focus'
       ? `/chains/${active.data.chain_id}/focus${active.data.pending_ruling ? '?mode=ruling' : ''}`
-      : `/chains/${active.data.chain_id}?mode=aux`;
+      : `/chains/${active.data.chain_id}/auxiliary`;
 
   return (
     <>

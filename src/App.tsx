@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import ChainList from './pages/ChainList';
 import ChainDetail from './pages/ChainDetail';
 import DataManagement from './pages/DataManagement';
+import AuxiliarySessionPage from './pages/AuxiliarySession';
 import FocusSessionPage from './pages/FocusSession';
 import History from './pages/History';
 import Review from './pages/Review';
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/chains" element={<ChainList />} />
             <Route path="/chains/:id" element={<ChainDetail />} />
+            <Route path="/chains/:id/auxiliary" element={<AuxiliarySessionPage />} />
             <Route path="/chains/:id/focus" element={<FocusSessionPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/review" element={<Review />} />

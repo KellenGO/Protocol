@@ -104,7 +104,7 @@ export default function Dashboard() {
           ) : (
             <button
               className="btn btn-primary"
-              onClick={() => navigate(`/chains/${summary.active_chain_id}?mode=aux`)}
+              onClick={() => navigate(`/chains/${summary.active_chain_id}/auxiliary`)}
             >
               查看辅助链
             </button>

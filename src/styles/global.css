@@ -1313,39 +1313,150 @@ textarea,
   margin-bottom: 0;
 }
 
-.focus-protocol-snapshot {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.session-page {
+  max-width: 640px;
+  min-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-bottom: 40px;
+}
+
+.session-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.session-header h2 {
+  margin-bottom: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.session-kicker {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.session-state {
+  flex-shrink: 0;
+  color: var(--gold);
+  background: var(--gold-subtle);
+  border: 1px solid var(--gold-border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.session-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 18px;
-  max-width: 760px;
+  margin-bottom: 14px;
+}
+
+.session-hint {
+  margin: 0 auto 12px;
+  text-align: center;
+}
+
+.session-details {
+  width: 100%;
+  max-width: 560px;
+  margin: 6px auto 0;
+}
+
+.session-details summary {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.session-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-details summary::after {
+  content: '+';
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.session-details[open] summary {
+  color: var(--text-primary);
+}
+
+.session-details[open] summary::after {
+  content: '-';
+  color: var(--gold);
+  border-color: var(--gold-border);
+}
+
+.session-detail-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.session-detail-card .protocol-fact {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.session-detail-card .protocol-fact-value {
+  font-size: 12px;
 }
 
 /* ===== Focus Session ===== */
-
-.focus-header {
-  margin-bottom: 32px;
-}
-
-.focus-header h2 {
-  margin-bottom: 4px;
-}
-
-.focus-chain-length {
-  font-size: 13px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
 
 .focus-timer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 56px 24px;
+  padding: 48px 24px;
   margin-bottom: 24px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
+}
+
+.session-page .focus-timer {
+  width: 100%;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .focus-time {
@@ -1458,6 +1569,36 @@ textarea,
 .focus-precedent-icon {
   background: var(--gold-subtle);
   color: var(--gold);
+}
+
+@media (max-width: 720px) {
+  .session-page {
+    justify-content: flex-start;
+    min-height: auto;
+  }
+
+  .session-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .session-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .session-actions .btn {
+    width: 100%;
+  }
+
+  .focus-time {
+    font-size: 64px;
+  }
+
+  .session-detail-card {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ===== Ruling Panel ===== */
@@ -1701,35 +1842,6 @@ textarea,
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
-}
-
-/* ===== Reservation ===== */
-
-.res-session-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 24px;
-}
-
-.res-chain-name {
-  font-size: 16px;
-  font-weight: 600;
-  font-family: var(--font-display);
-  color: var(--text-primary);
-}
-
-.res-due-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.res-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
 }
 
 /* ===== Global Focus Button ===== */

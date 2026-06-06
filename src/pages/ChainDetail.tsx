@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  expireReservationSession,
-  failReservationSessionPrecedent,
-  failReservationSessionReset,
   fulfillReservationAndStartFocus,
   getChain,
   getChainPrecedents,
@@ -17,72 +14,22 @@ import {
   updatePrecedent,
 } from '../lib/db';
 import EditChainForm from '../features/ctdp/EditChainForm';
-import { FAILURE_DEBUG_CATEGORIES } from '../features/ctdp/protocolOptions';
 import type {
   ActiveReservationSession,
   Chain,
   ChainPrecedent,
-  FailReservationPrecedentResult,
-  FailReservationResetResult,
   ProtocolPrecedent,
 } from '../types';
 
-type AuxiliaryPhase = 'idle' | 'countdown' | 'confirming' | 'ruling' | 'expired';
-
-type AuxiliaryDoneResult =
-  | { kind: 'failed_reset'; data: FailReservationResetResult }
-  | { kind: 'failed_precedent'; data: FailReservationPrecedentResult };
-
-const behaviorTypes = [
-  '通讯 / 消息打断',
-  '手机 / 娱乐诱惑',
-  '外部事件',
-  '生理需求',
-  '环境变化',
-  '任务定义不清',
-  '身体状态不佳',
-  '紧急情况',
-  '其他',
-];
-
-function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
+type AuxiliaryPhase = 'idle' | 'countdown' | 'confirming' | 'ruling';
 
 function formatDateTime(raw: string): string {
   return new Date(raw + 'Z').toLocaleString('zh-CN');
 }
 
-function reservationTargetTime(reservation: ActiveReservationSession): number {
-  const target = reservation.phase === 'confirming'
-    ? reservation.confirmation_due_at ?? reservation.due_at
-    : reservation.due_at;
-  return new Date(target + 'Z').getTime();
-}
-
 function auxiliaryPhaseFromReservation(reservation: ActiveReservationSession): AuxiliaryPhase {
   if (reservation.phase === 'pending_ruling') return 'ruling';
   return reservation.phase === 'confirming' ? 'confirming' : 'countdown';
-}
-
-function reservationFromFailure(result: FailReservationResetResult): ActiveReservationSession {
-  return {
-    id: result.session.id,
-    chain_id: result.session.chain_id,
-    created_at: result.session.created_at,
-    due_at: result.session.due_at,
-    confirmation_due_at: result.session.confirmation_due_at,
-    trigger_action: result.session.trigger_action,
-    completion_condition: result.session.completion_condition,
-    phase: 'pending_ruling',
-  };
-}
-
-function resolveBehavior(behaviorType: string, customBehavior: string): string {
-  if (behaviorType === '其他') return customBehavior.trim();
-  return behaviorType;
 }
 
 export default function ChainDetail() {
@@ -101,14 +48,6 @@ export default function ChainDetail() {
   const [hasActiveFocusOnThisChain, setHasActiveFocusOnThisChain] = useState(false);
   const [auxiliaryPhase, setAuxiliaryPhase] = useState<AuxiliaryPhase>('idle');
   const [reservation, setReservation] = useState<ActiveReservationSession | null>(null);
-  const [remaining, setRemaining] = useState(0);
-  const [expiredResult, setExpiredResult] = useState<FailReservationResetResult | null>(null);
-  const [auxiliaryDoneResult, setAuxiliaryDoneResult] = useState<AuxiliaryDoneResult | null>(null);
-  const [behaviorType, setBehaviorType] = useState(behaviorTypes[0]);
-  const [customBehavior, setCustomBehavior] = useState('');
-  const [debugCategory, setDebugCategory] = useState(FAILURE_DEBUG_CATEGORIES[0]);
-  const [debugNote, setDebugNote] = useState('');
-  const [rulingError, setRulingError] = useState('');
   const [selectedPrecedent, setSelectedPrecedent] = useState<ProtocolPrecedent | null>(null);
   const [precedentTitle, setPrecedentTitle] = useState('');
   const [precedentDescription, setPrecedentDescription] = useState('');
@@ -116,26 +55,6 @@ export default function ChainDetail() {
   const [precedentError, setPrecedentError] = useState('');
   const [error, setError] = useState('');
   const [warnMsg, setWarnMsg] = useState('');
-
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const expiringRef = useRef(false);
-
-  const handleExpireAuxiliary = useCallback(async () => {
-    if (!reservation || expiringRef.current) return;
-    expiringRef.current = true;
-    setError('');
-    try {
-      const result = await expireReservationSession(reservation.id);
-      setExpiredResult(result);
-      setReservation(reservationFromFailure(result));
-      setAuxiliaryPhase('ruling');
-      navigate(`/chains/${chainId}`, { replace: true });
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      expiringRef.current = false;
-    }
-  }, [chainId, navigate, reservation]);
 
   useEffect(() => {
     if (!chainId) return;
@@ -162,25 +81,10 @@ export default function ChainDetail() {
 
         if (globalReservation && globalReservation.chain_id === chainId) {
           const phase = auxiliaryPhaseFromReservation(globalReservation);
-          const target = reservationTargetTime(globalReservation);
-          const left = Math.max(0, Math.ceil((target - Date.now()) / 1000));
-
-          if (left <= 0 && phase === 'confirming') {
-            const expired = await expireReservationSession(globalReservation.id);
-            if (cancelled) return;
-            setExpiredResult(expired);
-            setReservation(reservationFromFailure(expired));
-            setRemaining(0);
-            setAuxiliaryPhase('ruling');
-            return;
-          }
-
           setReservation(globalReservation);
-          setRemaining(left);
           setAuxiliaryPhase(phase);
         } else {
           setReservation(null);
-          setRemaining(0);
           setAuxiliaryPhase('idle');
           if (globalReservation) {
             setWarnMsg(`已有辅助链预约中：${globalReservation.chain_name}`);
@@ -207,34 +111,6 @@ export default function ChainDetail() {
     openPrecedent(id);
   }, [searchParams]);
 
-  useEffect(() => {
-    if (auxiliaryPhase !== 'countdown' && auxiliaryPhase !== 'confirming') return;
-
-    timerRef.current = setInterval(() => {
-      setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [auxiliaryPhase]);
-
-  useEffect(() => {
-    if (remaining !== 0) return;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    if (auxiliaryPhase === 'countdown' && reservation) {
-      const confirmationTarget = new Date((reservation.confirmation_due_at ?? reservation.due_at) + 'Z').getTime();
-      setRemaining(Math.max(0, Math.ceil((confirmationTarget - Date.now()) / 1000)));
-      setReservation({ ...reservation, phase: 'confirming' });
-      setAuxiliaryPhase('confirming');
-      return;
-    }
-    if (auxiliaryPhase === 'confirming') handleExpireAuxiliary();
-  }, [remaining, auxiliaryPhase, handleExpireAuxiliary, reservation]);
-
   async function enterMainFromReservation(reservationId: number) {
     const result = await fulfillReservationAndStartFocus(reservationId);
     setHasActiveFocusOnThisChain(true);
@@ -248,56 +124,6 @@ export default function ChainDetail() {
     ]);
     setPrecedents(p);
     setReservationPrecedents(rp);
-  }
-
-  function getBehavior(): string | null {
-    const behavior = resolveBehavior(behaviorType, customBehavior);
-    if (!behavior) {
-      setRulingError('请填写自定义争议行为。');
-      return null;
-    }
-    setRulingError('');
-    return behavior;
-  }
-
-  async function handleAuxiliaryResetRuling() {
-    const behavior = getBehavior();
-    if (!reservation || !behavior) return;
-    try {
-      const result = await failReservationSessionReset(
-        reservation.id,
-        behavior,
-        debugCategory,
-        debugNote,
-      );
-      setAuxiliaryDoneResult({ kind: 'failed_reset', data: result });
-      setChain(result.chain);
-      setReservation(null);
-      setAuxiliaryPhase('expired');
-      await reloadPrecedents();
-    } catch (err) {
-      setRulingError(String(err));
-    }
-  }
-
-  async function handleAuxiliaryPrecedentRuling() {
-    const behavior = getBehavior();
-    if (!reservation || !behavior) return;
-    try {
-      const result = await failReservationSessionPrecedent(
-        reservation.id,
-        { title: behavior, description: '' },
-        debugCategory,
-        debugNote,
-      );
-      setAuxiliaryDoneResult({ kind: 'failed_precedent', data: result });
-      setChain(result.chain);
-      setReservation(null);
-      setAuxiliaryPhase('expired');
-      await reloadPrecedents();
-    } catch (err) {
-      setRulingError(String(err));
-    }
   }
 
   async function openPrecedent(id: number) {
@@ -395,7 +221,6 @@ export default function ChainDetail() {
     setStartingAuxiliary(true);
     setWarnMsg('');
     setError('');
-    setExpiredResult(null);
     try {
       const globalReservation = await getGlobalActiveReservationSession();
       if (globalReservation) {
@@ -409,13 +234,8 @@ export default function ChainDetail() {
         return;
       }
 
-      const created = await startReservationSession(chain.id);
-      const target = reservationTargetTime(created);
-      const left = Math.max(1, Math.ceil((target - Date.now()) / 1000));
-      setReservation(created);
-      setRemaining(left);
-      setAuxiliaryPhase(auxiliaryPhaseFromReservation(created));
-      navigate(`/chains/${chain.id}?mode=aux`, { replace: true });
+      await startReservationSession(chain.id);
+      navigate(`/chains/${chain.id}/auxiliary`);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -520,9 +340,9 @@ export default function ChainDetail() {
           <button className="btn btn-primary" onClick={() => navigate(`/chains/${chain.id}/focus`)} aria-label={`回到主链 ${chain.name} 的神圣座位`}>
             回到神圣座位
           </button>
-        ) : auxiliaryPhase === 'ruling' ? (
-          <button className="btn btn-primary" onClick={() => document.getElementById('auxiliary-ruling')?.scrollIntoView({ behavior: 'smooth' })} aria-label={`处理主链 ${chain.name} 的辅助链裁决`}>
-            处理辅助链裁决
+        ) : auxiliaryPhase !== 'idle' ? (
+          <button className="btn btn-primary" onClick={() => navigate(`/chains/${chain.id}/auxiliary`)} aria-label={`进入主链 ${chain.name} 的辅助链窗口`}>
+            {auxiliaryPhase === 'ruling' ? '处理辅助链裁决' : '进入辅助链'}
           </button>
         ) : (
           <button className="btn btn-primary" disabled={startingMain} onClick={handleStartMain}>
@@ -542,27 +362,6 @@ export default function ChainDetail() {
           编辑协议
         </button>
       </div>
-
-      <AuxiliaryRuntime
-        phase={auxiliaryPhase}
-        chain={chain}
-        reservation={reservation}
-        remaining={remaining}
-        expiredResult={expiredResult}
-        doneResult={auxiliaryDoneResult}
-        behaviorType={behaviorType}
-        customBehavior={customBehavior}
-        debugCategory={debugCategory}
-        debugNote={debugNote}
-        rulingError={rulingError}
-        setBehaviorType={setBehaviorType}
-        setCustomBehavior={setCustomBehavior}
-        setDebugCategory={setDebugCategory}
-        setDebugNote={setDebugNote}
-        onResetRuling={handleAuxiliaryResetRuling}
-        onPrecedentRuling={handleAuxiliaryPrecedentRuling}
-        onEnterMain={handleStartMain}
-      />
 
       <div className="precedents-section" aria-labelledby="protocol-boundary-heading">
         <h3 id="protocol-boundary-heading">协议边界</h3>
@@ -620,182 +419,6 @@ function ProtocolFact({ label, value }: { label: string; value: string }) {
     <div className="protocol-fact">
       <span className="detail-label">{label}</span>
       <span className="protocol-fact-value">{value}</span>
-    </div>
-  );
-}
-
-function AuxiliaryRuntime({
-  phase,
-  chain,
-  reservation,
-  remaining,
-  expiredResult,
-  doneResult,
-  behaviorType,
-  customBehavior,
-  debugCategory,
-  debugNote,
-  rulingError,
-  setBehaviorType,
-  setCustomBehavior,
-  setDebugCategory,
-  setDebugNote,
-  onResetRuling,
-  onPrecedentRuling,
-  onEnterMain,
-}: {
-  phase: AuxiliaryPhase;
-  chain: Chain;
-  reservation: ActiveReservationSession | null;
-  remaining: number;
-  expiredResult: FailReservationResetResult | null;
-  doneResult: AuxiliaryDoneResult | null;
-  behaviorType: string;
-  customBehavior: string;
-  debugCategory: string;
-  debugNote: string;
-  rulingError: string;
-  setBehaviorType: (value: string) => void;
-  setCustomBehavior: (value: string) => void;
-  setDebugCategory: (value: string) => void;
-  setDebugNote: (value: string) => void;
-  onResetRuling: () => void;
-  onPrecedentRuling: () => void;
-  onEnterMain: () => void;
-}) {
-  if (phase === 'idle') return null;
-
-  if (phase === 'expired') {
-    const chainUpdate = doneResult?.data.chain ?? expiredResult?.chain ?? chain;
-    const precedent = doneResult?.kind === 'failed_precedent' ? doneResult.data.precedent : null;
-    return (
-      <div className="auxiliary-runtime" role="status" aria-live="polite">
-        <h3>{precedent ? '辅助链判例化完成' : '辅助链裁决完成'}</h3>
-        <p className="ruling-result-desc">
-          {precedent
-            ? `新的辅助链边界已写入：${precedent.title}。主链和辅助链长度保持不变。`
-            : `辅助链已判定违约。主链 ${chainUpdate.name} 的长度不受影响，辅助链连续长度已清零。`}
-        </p>
-        <div className="focus-chain-update">
-          <span className="focus-chain-label">{chainUpdate.name}</span>
-          <div className="focus-chain-numbers">
-            <span className="focus-chain-item">
-              当前 <strong>{chainUpdate.current_length}</strong> 节
-            </span>
-            <span className="focus-chain-item">
-              最佳 <strong>{chainUpdate.best_length}</strong> 节
-            </span>
-          </div>
-          <div className="focus-chain-numbers">
-            <span className="focus-chain-item">
-              辅助当前 <strong>{chainUpdate.auxiliary_current_length}</strong> 节
-            </span>
-            <span className="focus-chain-item">
-              辅助最佳 <strong>{chainUpdate.auxiliary_best_length}</strong> 节
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (phase === 'ruling') {
-    return (
-      <div id="auxiliary-ruling" className="auxiliary-runtime ruling-panel-wide" role="region" aria-labelledby="auxiliary-ruling-heading">
-        <h3 id="auxiliary-ruling-heading">辅助链裁决</h3>
-        <p className="ruling-desc">
-          辅助链确认窗口已经结束。现在必须把本次未履约判定为违约，或写成辅助链判例，成为未来协议边界的一部分。
-        </p>
-
-        <div className="ruling-form">
-          <label className="form-field">
-            <span>争议行为类型</span>
-            <select className="form-select" value={behaviorType} onChange={(e) => setBehaviorType(e.target.value)}>
-              {behaviorTypes.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {behaviorType === '其他' && (
-            <label className="form-field">
-              <span>自定义争议行为</span>
-              <input
-                value={customBehavior}
-                onChange={(e) => setCustomBehavior(e.target.value)}
-                placeholder="简短描述争议行为"
-              />
-            </label>
-          )}
-        </div>
-
-        <div className="debug-fields">
-          <label className="form-field">
-            <span>失败调试分类</span>
-            <select className="form-select" value={debugCategory} onChange={(e) => setDebugCategory(e.target.value)}>
-              {FAILURE_DEBUG_CATEGORIES.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>调试备注</span>
-            <textarea
-              value={debugNote}
-              onChange={(e) => setDebugNote(e.target.value)}
-              placeholder="可选：记录本次预约失败的真实上下文"
-            />
-          </label>
-        </div>
-
-        {rulingError && <p className="form-error" role="alert">{rulingError}</p>}
-
-        <div className="ruling-options">
-          <button className="ruling-option ruling-reset" onClick={onResetRuling} aria-label="判定辅助链违约并清零辅助链">
-            <span className="ruling-option-title">判定违约：辅助链断裂并清零</span>
-            <span className="ruling-option-consequence">主链长度不变；本次事件写入协议时间线。</span>
-          </button>
-          <button className="ruling-option ruling-precedent" onClick={onPrecedentRuling} aria-label="将本次辅助链事件写入判例">
-            <span className="ruling-option-title">判例化：写入辅助链边界</span>
-            <span className="ruling-option-consequence">辅助链不清零，未来同类情况默认允许。</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!reservation) return null;
-
-  return (
-    <div className="auxiliary-runtime" role="region" aria-label="辅助链预约状态">
-      <div className="res-session-header">
-        <span className="res-chain-name">
-          {chain.name} / {phase === 'confirming' ? '辅助链待确认' : '辅助链预约中'}
-        </span>
-        <span className="res-due-label">
-          {phase === 'confirming'
-            ? `确认截止 ${formatDateTime(reservation.confirmation_due_at ?? reservation.due_at)}`
-            : `窗口结束 ${formatDateTime(reservation.due_at)}`}
-        </span>
-      </div>
-      <div className="focus-timer">
-        <span className="focus-time">{formatTime(remaining)}</span>
-        <span className="focus-status">{phase === 'confirming' ? '确认窗口' : '预约窗口'}</span>
-      </div>
-      <div className="res-actions">
-        <button className="btn btn-primary btn-large" onClick={onEnterMain}>
-          进入主链
-        </button>
-        <p className="focus-hint" style={{ textAlign: 'center' }}>
-          {phase === 'confirming'
-            ? '第二预约信号已触发；确认窗口结束前进入主链仍视为履约成功。'
-            : '在预约窗口结束前进入主链即视为辅助链履约成功。'}
-        </p>
-      </div>
     </div>
   );
 }

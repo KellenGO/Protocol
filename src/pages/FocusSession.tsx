@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   clearFocusSessionPendingRuling,
@@ -257,7 +258,17 @@ export default function FocusSessionPage() {
 
   if (phase === 'ruling') {
     return (
-      <div className="page">
+      <div className="page session-page">
+        {chain && (
+          <div className="session-header">
+            <div>
+              <span className="session-kicker">主链窗口</span>
+              <h2>{chain.name}</h2>
+            </div>
+            <span className="session-state">主链裁决</span>
+          </div>
+        )}
+
         <div className="ruling-panel ruling-panel-wide">
           <h3>主链裁决</h3>
           <p className="ruling-desc">
@@ -295,6 +306,16 @@ export default function FocusSessionPage() {
             返回神圣座位
           </button>
         </div>
+
+        {chain && session && (
+          <SessionDetails title="查看链详情">
+            <ProtocolSnapshot label="触发动作" value={session.trigger_action} />
+            <ProtocolSnapshot label="完成条件" value={session.completion_condition} />
+            <ProtocolSnapshot label="本次时长" value={`${session.duration_minutes ?? chain.focus_duration_minutes} 分钟`} />
+            <ProtocolSnapshot label="当前主链" value={`${chain.current_length} 节`} />
+            <ProtocolSnapshot label="最佳主链" value={`${chain.best_length} 节`} />
+          </SessionDetails>
+        )}
       </div>
     );
   }
@@ -302,19 +323,15 @@ export default function FocusSessionPage() {
   const isTimerDone = remaining === 0;
 
   return (
-    <div className="page">
+    <div className="page session-page">
       {chain && session && (
         <>
-          <div className="focus-header">
-            <h2>{chain.name}</h2>
-            <span className="focus-chain-length">
-              神圣座位已占用 / 当前 {chain.current_length} 节 / 本次 {session.duration_minutes ?? chain.focus_duration_minutes} 分钟
-            </span>
-          </div>
-
-          <div className="focus-protocol-snapshot">
-            <ProtocolSnapshot label="触发动作" value={session.trigger_action} />
-            <ProtocolSnapshot label="完成条件" value={session.completion_condition} />
+          <div className="session-header">
+            <div>
+              <span className="session-kicker">主链窗口</span>
+              <h2>{chain.name}</h2>
+            </div>
+            <span className="session-state">{isTimerDone ? '等待确认' : '神圣座位已占用'}</span>
           </div>
 
           <div className={`focus-timer ${isTimerDone ? 'timer-done' : ''}`}>
@@ -322,22 +339,48 @@ export default function FocusSessionPage() {
             <span className="focus-status">{isTimerDone ? '时间已到' : '神圣座位进行中'}</span>
           </div>
 
-          {isTimerDone ? (
-            <button className="btn btn-primary btn-large" onClick={handleComplete}>
-              确认主链完成
+          <div className="session-actions">
+            {isTimerDone ? (
+              <button className="btn btn-primary btn-large" onClick={handleComplete}>
+                确认主链完成
+              </button>
+            ) : (
+              <button className="btn btn-danger-outline" onClick={enterRuling}>
+                进入裁决
+              </button>
+            )}
+            <button className="btn btn-secondary" onClick={() => navigate(`/chains/${chainId}`)}>
+              返回启动页
             </button>
-          ) : (
-            <button className="btn btn-danger-outline" onClick={enterRuling}>
-              进入裁决
-            </button>
-          )}
+          </div>
 
-          <button className="btn btn-secondary" style={{ marginTop: 12 }} onClick={() => navigate(`/chains/${chainId}`)}>
-            返回链详情
-          </button>
+          <SessionDetails title="查看链详情">
+            <ProtocolSnapshot label="触发动作" value={session.trigger_action} />
+            <ProtocolSnapshot label="完成条件" value={session.completion_condition} />
+            <ProtocolSnapshot label="本次时长" value={`${session.duration_minutes ?? chain.focus_duration_minutes} 分钟`} />
+            <ProtocolSnapshot label="当前主链" value={`${chain.current_length} 节`} />
+            <ProtocolSnapshot label="最佳主链" value={`${chain.best_length} 节`} />
+          </SessionDetails>
         </>
       )}
     </div>
+  );
+}
+
+function SessionDetails({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="session-details">
+      <summary>{title}</summary>
+      <div className="session-detail-card">
+        {children}
+      </div>
+    </details>
   );
 }
 
