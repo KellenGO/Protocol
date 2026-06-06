@@ -3421,6 +3421,167 @@ textarea,
   max-width: 1040px;
 }
 
+/* Header + tabs */
+
+.rsip-review-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.rsip-review-header .page-title-block {
+  min-width: 0;
+}
+
+.rsip-review-header h2 {
+  margin-bottom: 4px;
+}
+
+.rsip-review-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.rsip-review-tab {
+  padding: 7px 16px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+
+.rsip-review-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.rsip-review-tab.active {
+  background: var(--gold-subtle);
+  color: var(--gold);
+  font-weight: 500;
+}
+
+/* Overview card */
+
+.rsip-overview-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.rsip-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.rsip-overview-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px;
+  border-right: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+
+.rsip-overview-stat:last-child {
+  border-right: none;
+}
+
+.rsip-overview-stat-value {
+  font-size: 26px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.3px;
+}
+
+.rsip-overview-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rsip-overview-stat-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rsip-overview-stat-positive .rsip-overview-stat-value {
+  color: var(--success);
+}
+
+.rsip-overview-stat-negative .rsip-overview-stat-value {
+  color: var(--danger);
+}
+
+.rsip-overview-insight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-base);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.rsip-overview-insight strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.rsip-overview-insight-sep {
+  margin: 0 6px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 780px) {
+  .rsip-review-header {
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .rsip-overview-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rsip-overview-stat:nth-child(2) {
+    border-right: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .rsip-overview-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .rsip-overview-stat {
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .rsip-overview-stat:last-child {
+    border-bottom: none;
+  }
+}
+
 .rsip-review-card-desc {
   margin: -4px 0 14px;
   color: var(--text-secondary);

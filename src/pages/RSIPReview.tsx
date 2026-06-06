@@ -88,27 +88,21 @@ export default function RSIPReview() {
 
   return (
     <div className="page review-page rsip-review-page">
-      <div className="review-hero">
+      <div className="rsip-review-header">
         <div className="page-title-block">
           <h2>RSIP复盘</h2>
           <p className="page-subtitle">{RSIP_REVIEW_HINT}</p>
         </div>
-      </div>
-
-      <div className="review-controls control-card">
-        <div className="review-control-group">
-          <span className="review-control-label">复盘模式</span>
-          <div className="review-tabs">
-            {TABS.map((item) => (
-              <button
-                key={item.key}
-                className={`review-tab ${tab === item.key ? 'review-tab-active' : ''}`}
-                onClick={() => setTab(item.key)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+        <div className="rsip-review-tabs">
+          {TABS.map((item) => (
+            <button
+              key={item.key}
+              className={`rsip-review-tab ${tab === item.key ? 'active' : ''}`}
+              onClick={() => setTab(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -161,58 +155,41 @@ function RsipReviewSummary({
   const summary = review.summary;
 
   return (
-    <div className="review-chain-summary">
-      <div className="review-summary-grid">
-        <ReviewSummaryMetric label="定式总数" value={summary.totalFormulas} detail="根定式与子定式合计" />
-        <ReviewSummaryMetric
-          label="点亮"
-          value={summary.activeFormulas}
-          detail={`${summary.inactiveFormulas} 个未点亮`}
-          tone="positive"
-        />
-        <ReviewSummaryMetric
-          label="熄灭事件"
-          value={summary.deactivationEvents}
-          detail={`递归回滚 ${summary.rollbackEvents} 次`}
-          tone={summary.deactivationEvents > 0 || summary.rollbackEvents > 0 ? 'negative' : 'neutral'}
-        />
-        <ReviewSummaryMetric label="目标" value={summary.linkedGoals} detail={`失败路径 ${summary.failurePaths} 条`} />
+    <div className="rsip-overview-card">
+      <div className="rsip-overview-stats">
+        <div className="rsip-overview-stat">
+          <strong className="rsip-overview-stat-value">{summary.totalFormulas}</strong>
+          <span className="rsip-overview-stat-label">定式总数</span>
+          <span className="rsip-overview-stat-detail">根 {summary.rootFormulas} · 子 {summary.childFormulas}</span>
+        </div>
+        <div className="rsip-overview-stat rsip-overview-stat-positive">
+          <strong className="rsip-overview-stat-value">{summary.activeFormulas}</strong>
+          <span className="rsip-overview-stat-label">已点亮</span>
+          <span className="rsip-overview-stat-detail">{summary.inactiveFormulas} 个未点亮</span>
+        </div>
+        <div className={`rsip-overview-stat ${summary.deactivationEvents > 0 ? 'rsip-overview-stat-negative' : ''}`}>
+          <strong className="rsip-overview-stat-value">{summary.deactivationEvents}</strong>
+          <span className="rsip-overview-stat-label">熄灭事件</span>
+          <span className="rsip-overview-stat-detail">回滚 {summary.rollbackEvents} 次</span>
+        </div>
+        <div className="rsip-overview-stat">
+          <strong className="rsip-overview-stat-value">{summary.linkedGoals}</strong>
+          <span className="rsip-overview-stat-label">目标</span>
+          <span className="rsip-overview-stat-detail">{summary.failurePaths} 条失败路径</span>
+        </div>
       </div>
 
-      <div className="review-insight-strip">
+      <div className="rsip-overview-insight">
         {review.priorityFormulas.length > 0 ? (
           <span>
-            优先复盘：
-            <strong>{review.priorityFormulas[0].formula.title}</strong>
-            ，风险分 {review.priorityFormulas[0].priorityScore}
+            优先复盘 <strong>{review.priorityFormulas[0].formula.title}</strong>
+            <span className="rsip-overview-insight-sep">·</span>
+            风险分 {review.priorityFormulas[0].priorityScore}
           </span>
         ) : (
-          <span>当前还没有可复盘的RSIP定式。</span>
+          <span>当前还没有可复盘的RSIP定式</span>
         )}
-        <span>
-          定式结构：根定式 {summary.rootFormulas} 个，子定式 {summary.childFormulas} 个
-        </span>
       </div>
-    </div>
-  );
-}
-
-function ReviewSummaryMetric({
-  label,
-  value,
-  detail,
-  tone = 'neutral',
-}: {
-  label: string;
-  value: string | number;
-  detail: string;
-  tone?: 'positive' | 'negative' | 'neutral';
-}) {
-  return (
-    <div className={`review-summary-metric review-summary-metric-${tone}`}>
-      <span className="review-summary-metric-label">{label}</span>
-      <strong className="review-summary-metric-value">{value}</strong>
-      <span className="review-summary-metric-detail">{detail}</span>
     </div>
   );
 }
