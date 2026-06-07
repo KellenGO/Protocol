@@ -25,6 +25,10 @@ type ActionFeedback = {
   text: string;
 };
 
+function normalizeFormulaTitle(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
 function buildTree(formulas: RsipFormula[]): FormulaNode[] {
   const map = new Map<number, FormulaNode>();
   formulas.forEach((f) => map.set(f.id, { ...f, children: [] }));
@@ -60,6 +64,8 @@ export default function RSIP() {
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
   const [archivingGoalId, setArchivingGoalId] = useState<number | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
+  const [expandedFormulaIds, setExpandedFormulaIds] = useState<Set<number>>(() => new Set());
+  const [selectedFormulaId, setSelectedFormulaId] = useState<number | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [title, setTitle] = useState('');
@@ -70,6 +76,10 @@ export default function RSIP() {
 
   const tree = useMemo(() => buildTree(formulas), [formulas]);
   const activeCount = formulas.filter((f) => f.status === 'active').length;
+  const selectedFormula = selectedFormulaId
+    ? formulas.find((formula) => formula.id === selectedFormulaId) ?? null
+    : null;
+  const selectedFormulaNode = selectedFormulaId ? findFormulaNode(tree, selectedFormulaId) : null;
   const currentGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const goalFormulas = selectedGoalId
     ? formulas.filter((formula) => formula.goal_id === selectedGoalId)
@@ -97,16 +107,37 @@ export default function RSIP() {
     return () => window.clearTimeout(timer);
   }, [actionFeedback]);
 
+  useEffect(() => {
+    if (tree.length === 0) {
+      setSelectedFormulaId(null);
+      return;
+    }
+    if (!selectedFormulaId || !formulas.some((formula) => formula.id === selectedFormulaId)) {
+      setSelectedFormulaId(tree[0].id);
+    }
+  }, [formulas, selectedFormulaId, tree]);
+
   async function handleCreate() {
     if (!title.trim()) {
       setFormError('定式标题不能为空');
+      return;
+    }
+    const normalizedTitle = normalizeFormulaTitle(title);
+    const duplicateSibling = formulas.some(
+      (formula) =>
+        formula.parent_id === parentId &&
+        normalizeFormulaTitle(formula.title) === normalizedTitle,
+    );
+    if (duplicateSibling) {
+      setFormError(parentId ? '同一父定式下不能添加同名子定式。' : '同一层级下已经有同名定式。');
       return;
     }
     setCreating(true);
     setFormError('');
     try {
       const createdTitle = title.trim();
-      await createRsipFormula({
+      const createdParentId = parentId;
+      const created = await createRsipFormula({
         title: createdTitle,
         description: description.trim(),
         parentId,
@@ -116,6 +147,10 @@ export default function RSIP() {
       setParentId(null);
       setShowCreateForm(false);
       await reload();
+      if (createdParentId) {
+        setExpandedFormulaIds((current) => new Set(current).add(createdParentId));
+      }
+      setSelectedFormulaId(created.id);
       setActionFeedback({
         tone: 'success',
         text: `已写入「${createdTitle}」，可以继续点亮、添加子定式或进入复盘。`,
@@ -207,9 +242,33 @@ export default function RSIP() {
     setSelectedGoalId(goalId);
     await reload();
     setViewMode('tree');
+    if (_formula.parent_id) {
+      setExpandedFormulaIds((current) => new Set(current).add(_formula.parent_id!));
+    }
+    setSelectedFormulaId(_formula.id);
     setActionFeedback({
       tone: 'success',
       text: `目标转译完成：已生成「${_formula.title}」，现在可以点亮或进入复盘。`,
+    });
+  }
+
+  function toggleFormulaChildren(id: number, subtreeIds: number[]) {
+    setExpandedFormulaIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        subtreeIds.forEach((subtreeId) => next.delete(subtreeId));
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function expandFormulaSubtree(ids: number[]) {
+    setExpandedFormulaIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => next.add(id));
+      return next;
     });
   }
 
@@ -372,39 +431,58 @@ export default function RSIP() {
                 <FormulaTreeNode
                   key={node.id}
                   node={node}
-                  workingId={workingId}
-                  onAddChild={(id) => {
-                    setParentId(id);
-                    setShowCreateForm(true);
-                  }}
-                  onActivate={handleActivate}
-                  onDeactivate={handleDeactivate}
+                  depth={0}
+                  selectedFormulaId={selectedFormulaId}
+                  expandedFormulaIds={expandedFormulaIds}
+                  onSelect={setSelectedFormulaId}
+                  onToggleChildren={toggleFormulaChildren}
+                  onExpandSubtree={expandFormulaSubtree}
                 />
               ))}
             </div>
           )}
         </section>
 
-        <aside className="rsip-events-panel">
-          <div className="rsip-events-header">
-            <h3>最近 RSIP 事件</h3>
-            <span className="section-hint">{events.length} 条</span>
-          </div>
-          {events.length === 0 ? (
-            <p className="placeholder-text" aria-live="polite">暂无定式事件</p>
-          ) : (
-            <div className="rsip-events-compact">
-              {events.slice(0, 6).map((event) => (
-                <div key={event.id} className="rsip-event-row">
-                  <span className={`formula-event-type event-${event.event_type}`}>
-                    {formulaEventLabel(event.event_type)}
-                  </span>
-                  <span className="rsip-event-row-title">{event.formula_title}</span>
-                  <span className="rsip-event-row-time">{formatProtocolDateTime(event.created_at)}</span>
-                </div>
-              ))}
+        <aside className="rsip-detail-sidebar">
+          <FormulaDetailPanel
+            formula={selectedFormula}
+            node={selectedFormulaNode}
+            parentFormula={selectedFormula?.parent_id
+              ? formulas.find((formula) => formula.id === selectedFormula.parent_id) ?? null
+              : null}
+            workingId={workingId}
+            onReview={(id) => navigate(`/rsip-review?formula=${id}`)}
+            onAddChild={(id) => {
+              setParentId(id);
+              setExpandedFormulaIds((current) => new Set(current).add(id));
+              setShowCreateForm(true);
+            }}
+            onActivate={handleActivate}
+            onDeactivate={handleDeactivate}
+            onExpandSubtree={(ids) => expandFormulaSubtree(ids)}
+          />
+
+          <section className="rsip-events-panel">
+            <div className="rsip-events-header">
+              <h3>最近 RSIP 事件</h3>
+              <span className="section-hint">{events.length} 条</span>
             </div>
-          )}
+            {events.length === 0 ? (
+              <p className="placeholder-text" aria-live="polite">暂无定式事件</p>
+            ) : (
+              <div className="rsip-events-compact">
+                {events.slice(0, 6).map((event) => (
+                  <div key={event.id} className="rsip-event-row">
+                    <span className={`formula-event-type event-${event.event_type}`}>
+                      {formulaEventLabel(event.event_type)}
+                    </span>
+                    <span className="rsip-event-row-title">{event.formula_title}</span>
+                    <span className="rsip-event-row-time">{formatProtocolDateTime(event.created_at)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </aside>
       </div>
       ) : (
@@ -617,6 +695,15 @@ function GoalTranslationWizard({
       setError('定式标题不能为空。');
       return;
     }
+    const duplicateSibling = formulas.some(
+      (formula) =>
+        formula.parent_id === parentId &&
+        normalizeFormulaTitle(formula.title) === normalizeFormulaTitle(formulaTitle),
+    );
+    if (duplicateSibling) {
+      setError(parentId ? '同一父定式下不能添加同名子定式。' : '同一层级下已经有同名定式。');
+      return;
+    }
     if (parentId && !dependencyNote.trim()) {
       setError('选择父定式时，需要说明它为什么依赖父定式。');
       return;
@@ -819,87 +906,207 @@ function parseFailurePathNodes(nodesJson: string): FailurePathNode[] {
   }
 }
 
-function FormulaTreeNode({
+function FormulaDetailPanel({
+  formula,
   node,
+  parentFormula,
   workingId,
+  onReview,
   onAddChild,
   onActivate,
   onDeactivate,
+  onExpandSubtree,
 }: {
-  node: FormulaNode;
+  formula: RsipFormula | null;
+  node: FormulaNode | null;
+  parentFormula: RsipFormula | null;
   workingId: number | null;
+  onReview: (id: number) => void;
   onAddChild: (id: number) => void;
   onActivate: (id: number) => void;
   onDeactivate: (id: number) => void;
+  onExpandSubtree: (ids: number[]) => void;
 }) {
-  const navigate = useNavigate();
+  if (!formula) {
+    return (
+      <section className="rsip-formula-detail-panel">
+        <div className="empty-state compact">
+          <p className="empty-title">选择一个定式</p>
+          <p className="empty-desc">从左侧树索引选择定式后，在这里查看说明和执行操作。</p>
+        </div>
+      </section>
+    );
+  }
+
+  const activeChildren = node ? countActive(node.children) : 0;
+  const childCount = node?.children.length ?? 0;
+  const expandableIds = node ? collectExpandableIds(node) : [];
+  const isWorking = workingId === formula.id;
+
+  return (
+    <section className="rsip-formula-detail-panel">
+      <div className="rsip-formula-detail-head">
+        <div>
+          <span className={`formula-status status-${formula.status}`}>
+            {formula.status === 'active' ? '点亮' : '未点亮'}
+          </span>
+          <h3>{formula.title}</h3>
+        </div>
+        <button className="btn btn-secondary" onClick={() => onReview(formula.id)}>
+          复盘
+        </button>
+      </div>
+
+      <div className="rsip-detail-metrics">
+        <div className="review-metric review-metric-neutral">
+          <span className="review-metric-value">{childCount}</span>
+          <span className="review-metric-label">直接子定式</span>
+        </div>
+        <div className="review-metric review-metric-neutral">
+          <span className="review-metric-value">{activeChildren}</span>
+          <span className="review-metric-label">active 子树</span>
+        </div>
+      </div>
+
+      <div className="rsip-detail-desc-section">
+        <span className="rsip-detail-section-label">执行说明</span>
+        <p>{formula.description || '暂无执行说明。'}</p>
+      </div>
+
+      <div className="rsip-detail-desc-section">
+        <span className="rsip-detail-section-label">层级关系</span>
+        <p>{parentFormula ? `父定式：${parentFormula.title}` : '根定式'}</p>
+        {formula.dependency_note && <p>{formula.dependency_note}</p>}
+      </div>
+
+      <div className="rsip-detail-action-grid">
+        <button className="btn btn-secondary" onClick={() => onAddChild(formula.id)}>
+          加子定式
+        </button>
+        {formula.status === 'active' ? (
+          <button
+            className="btn-danger-outline compact-btn"
+            disabled={isWorking}
+            onClick={() => onDeactivate(formula.id)}
+          >
+            熄灭
+          </button>
+        ) : (
+          <button className="btn btn-primary" disabled={isWorking} onClick={() => onActivate(formula.id)}>
+            点亮
+          </button>
+        )}
+        {expandableIds.length > 0 && (
+          <button className="btn btn-secondary" onClick={() => onExpandSubtree(expandableIds)}>
+            展开全部关联子式
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FormulaTreeNode({
+  node,
+  depth,
+  selectedFormulaId,
+  expandedFormulaIds,
+  onSelect,
+  onToggleChildren,
+  onExpandSubtree,
+}: {
+  node: FormulaNode;
+  depth: number;
+  selectedFormulaId: number | null;
+  expandedFormulaIds: Set<number>;
+  onSelect: (id: number) => void;
+  onToggleChildren: (id: number, subtreeIds: number[]) => void;
+  onExpandSubtree: (ids: number[]) => void;
+}) {
   const activeChildren = countActive(node.children);
-  const isWorking = workingId === node.id;
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expandedFormulaIds.has(node.id);
+  const expandableIds = collectExpandableIds(node);
+  const canExpandSubtree =
+    depth === 0 && expandableIds.length > 1 && expandableIds.some((id) => !expandedFormulaIds.has(id));
+  const isSelected = selectedFormulaId === node.id;
 
   return (
     <div className="formula-node-wrap">
-      <div className="formula-node">
-        <div className="formula-node-main">
+      <div className={`formula-tree-row ${isSelected ? 'selected' : ''}`}>
+        {hasChildren ? (
+          <button
+            type="button"
+            className="formula-tree-expander"
+            aria-label={isExpanded ? `收起 ${node.title} 的子定式` : `展开 ${node.title} 的子定式`}
+            aria-expanded={isExpanded}
+            onClick={() => onToggleChildren(node.id, expandableIds)}
+          >
+            {isExpanded ? '−' : '+'}
+          </button>
+        ) : (
+          <span className="formula-tree-expander placeholder" aria-hidden="true" />
+        )}
+
+        <button
+          type="button"
+          className="formula-tree-select"
+          onClick={() => onSelect(node.id)}
+          aria-current={isSelected ? 'true' : undefined}
+        >
           <span className={`formula-status status-${node.status}`}>
             {node.status === 'active' ? '点亮' : '未点亮'}
           </span>
-          <div className="formula-node-copy">
-            <span className="formula-node-title">{node.title}</span>
-            {node.description && (
-              <span className="formula-node-desc">{node.description}</span>
-            )}
-            <span className="formula-node-meta">
-              子定式 {node.children.length} 个 · active 子定式 {activeChildren} 个
-            </span>
-          </div>
-        </div>
-        <div className="formula-node-actions">
+          <span className="formula-tree-title">{node.title}</span>
+          <span className="formula-tree-meta">子 {node.children.length} · 亮 {activeChildren}</span>
+        </button>
+
+        {canExpandSubtree && (
           <button
-            className="btn btn-secondary"
-            onClick={() => navigate(`/rsip-review?formula=${node.id}`)}
+            type="button"
+            className="formula-tree-expand-all"
+            onClick={() => onExpandSubtree(expandableIds)}
           >
-            复盘
+            全部
           </button>
-          <button className="btn btn-secondary" onClick={() => onAddChild(node.id)} aria-label={`为定式 ${node.title} 添加子定式`}>
-            加子定式
-          </button>
-          {node.status === 'active' ? (
-            <button
-              className="btn-danger-outline compact-btn"
-              disabled={isWorking}
-              onClick={() => onDeactivate(node.id)}
-              aria-label={`熄灭定式：${node.title}`}
-            >
-              熄灭
-            </button>
-          ) : (
-            <button
-              className="btn btn-primary"
-              disabled={isWorking}
-              onClick={() => onActivate(node.id)}
-              aria-label={`点亮定式：${node.title}`}
-            >
-              点亮
-            </button>
-          )}
-        </div>
+        )}
       </div>
-      {node.children.length > 0 && (
+      {hasChildren && isExpanded && (
         <div className="formula-children-stack">
           {node.children.map((child) => (
             <FormulaTreeNode
               key={child.id}
               node={child}
-              workingId={workingId}
-              onAddChild={onAddChild}
-              onActivate={onActivate}
-              onDeactivate={onDeactivate}
+              depth={depth + 1}
+              selectedFormulaId={selectedFormulaId}
+              expandedFormulaIds={expandedFormulaIds}
+              onSelect={onSelect}
+              onToggleChildren={onToggleChildren}
+              onExpandSubtree={onExpandSubtree}
             />
           ))}
         </div>
       )}
     </div>
   );
+}
+
+function collectExpandableIds(node: FormulaNode): number[] {
+  const ids: number[] = [];
+  if (node.children.length > 0) {
+    ids.push(node.id);
+  }
+  node.children.forEach((child) => ids.push(...collectExpandableIds(child)));
+  return ids;
+}
+
+function findFormulaNode(nodes: FormulaNode[], id: number): FormulaNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findFormulaNode(node.children, id);
+    if (child) return child;
+  }
+  return null;
 }
 
 function countActive(nodes: FormulaNode[]): number {
