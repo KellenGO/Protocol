@@ -1,0 +1,70 @@
+<h2>当前 RSIP 页面（定式树视图）</h2>
+<p class="subtitle">右侧边栏：创建定式卡片（短）+ 最近RSIP事件（长），左侧定式树可能很稀疏</p>
+
+<div class="section">
+  <h3>当前布局问题</h3>
+  <p class="subtitle">红色虚线框标注了不平衡感来源：左侧大面积空白 vs 右侧长列表</p>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;">
+  <!-- LEFT: Tree panel -->
+  <div style="background:#131316;border:1px solid #1e1e22;border-radius:8px;padding:16px;min-height:500px;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:14px;font-weight:600;color:#f0ede6;">定式树</span>
+      <span style="font-size:11px;color:#545250;">每天最多新增一个定式</span>
+    </div>
+    <div style="border:2px dashed rgba(184,84,74,0.3);border-radius:4px;padding:60px 20px;text-align:center;margin-top:8px;">
+      <span style="color:#8c8982;font-size:13px;">定式节点区域</span>
+      <br/>
+      <span style="color:#545250;font-size:11px;">可能只有少数几个定式<br/>大量留白空间</span>
+    </div>
+  </div>
+
+  <!-- RIGHT: Sidebar cards -->
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <!-- Create card - short -->
+    <div style="background:#131316;border:1px solid #1e1e22;border-radius:8px;padding:16px;">
+      <span style="font-size:14px;font-weight:600;color:#f0ede6;">创建定式</span>
+      <div style="margin-top:8px;padding:8px 10px;background:#0b0b0d;border:1px solid #252528;border-radius:4px;color:#545250;font-size:12px;">定式标题输入框</div>
+      <div style="margin-top:8px;padding:8px 10px 40px 10px;background:#0b0b0d;border:1px solid #252528;border-radius:4px;color:#545250;font-size:12px;">执行说明...</div>
+      <div style="margin-top:8px;display:flex;justify-content:flex-end;">
+        <span style="padding:6px 14px;background:#df9a3c;color:#0b0b0d;border-radius:4px;font-size:11px;">写入定式树</span>
+      </div>
+      <div style="text-align:center;margin-top:4px;font-size:10px;color:#545250;">──── 短卡片 ────</div>
+    </div>
+
+    <!-- Events card - long -->
+    <div style="background:#131316;border:1px solid rgba(184,84,74,0.25);border-radius:8px;padding:16px;border-left:3px solid rgba(184,84,74,0.4);">
+      <span style="font-size:14px;font-weight:600;color:#f0ede6;">最近 RSIP 事件</span>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;">
+        <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(184,84,74,0.12);color:#b8544a;">deactivated</span>
+          <span style="font-size:11px;color:#8c8982;font-family:monospace;">06-05 23:41</span>
+        </div>
+        <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;">activated</span>
+          <span style="font-size:11px;color:#8c8982;font-family:monospace;">06-04 08:15</span>
+        </div>
+        <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;">created</span>
+          <span style="font-size:11px;color:#8c8982;font-family:monospace;">06-03 14:22</span>
+        </div>
+        <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(184,84,74,0.12);color:#b8544a;">rollback</span>
+          <span style="font-size:11px;color:#8c8982;font-family:monospace;">06-02 19:30</span>
+        </div>
+        <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:9px;padding:2px 6px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;">created</span>
+          <span style="font-size:11px;color:#8c8982;font-family:monospace;">06-01 09:00</span>
+        </div>
+      </div>
+      <div style="text-align:center;margin-top:8px;font-size:10px;color:#b8544a;">──── 长列表，可无限延伸 ────</div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px;">
+  <div style="padding:12px 16px;background:rgba(201,138,70,0.08);border:1px solid rgba(201,138,70,0.25);border-radius:6px;">
+    <span style="color:#c98a46;font-size:13px;">问题：左侧定式树（主内容区）大量留白，右侧事件列表（辅助区）却占满整栏，视觉重心右倾，看起来头重脚轻。</span>
+  </div>
+</div>

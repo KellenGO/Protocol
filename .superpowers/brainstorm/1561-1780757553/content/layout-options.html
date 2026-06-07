@@ -1,0 +1,193 @@
+<h2>RSIP 页面构图 — 两种方案</h2>
+<p class="subtitle">核心原则：创建定式 = 动作 → 按钮展开；定式树 + 事件 = 信息 → 始终可见</p>
+
+<div class="section">
+  <h3>方案 A — 平衡双栏</h3>
+  <p class="subtitle">定式树（左 60%）+ 紧凑事件时间线（右 40%），创建按钮在顶部操作栏</p>
+</div>
+
+<div style="background:#131316;border:1px solid #1e1e22;border-radius:8px;overflow:hidden;">
+  <!-- Header -->
+  <div style="padding:16px 20px;border-bottom:1px solid #1e1e22;display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <span style="font-size:16px;font-weight:600;color:#f0ede6;">RSIP 定式树</span>
+      <span style="font-size:11px;color:#545250;margin-left:12px;">用低阻力定式递归改善生活稳态</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span style="padding:6px 12px;border:1px solid #1e1e22;border-radius:14px;font-size:11px;color:#8c8982;cursor:pointer;">定式树</span>
+      <span style="padding:6px 12px;border-radius:14px;font-size:11px;color:#545250;cursor:pointer;">目标</span>
+      <span style="padding:6px 14px;border:1px solid rgba(223,154,60,0.3);border-radius:14px;font-size:11px;color:#df9a3c;cursor:pointer;">+ 创建定式</span>
+      <span style="padding:6px 14px;background:#df9a3c;color:#0b0b0d;border-radius:14px;font-size:11px;font-weight:500;">新建目标转译</span>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #1e1e22;">
+    <div style="padding:12px 16px;text-align:center;border-right:1px solid #1e1e22;">
+      <span style="font-size:20px;font-weight:600;color:#f0ede6;">9</span>
+      <span style="font-size:10px;color:#545250;display:block;">定式总数</span>
+    </div>
+    <div style="padding:12px 16px;text-align:center;border-right:1px solid #1e1e22;">
+      <span style="font-size:20px;font-weight:600;color:#6ba882;">5</span>
+      <span style="font-size:10px;color:#545250;display:block;">已点亮</span>
+    </div>
+    <div style="padding:12px 16px;text-align:center;border-right:1px solid #1e1e22;">
+      <span style="font-size:20px;font-weight:600;color:#8c8982;">4</span>
+      <span style="font-size:10px;color:#545250;display:block;">未点亮</span>
+    </div>
+    <div style="padding:12px 16px;text-align:center;">
+      <span style="font-size:20px;font-weight:600;color:#f0ede6;">3</span>
+      <span style="font-size:10px;color:#545250;display:block;">Goals</span>
+    </div>
+  </div>
+
+  <!-- Two column body -->
+  <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);">
+    <!-- Tree -->
+    <div style="padding:16px;border-right:1px solid #1e1e22;">
+      <div style="padding:12px 14px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:6px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(107,168,130,0.12);color:#6ba882;">点亮</span>
+          <span style="font-size:13px;font-weight:600;color:#f0ede6;margin-left:8px;">手机不上床</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">复盘</span>
+          <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">+子</span>
+        </div>
+      </div>
+      <div style="padding:12px 14px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:6px;margin-bottom:8px;margin-left:20px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(140,137,130,0.08);color:#545250;">未点亮</span>
+          <span style="font-size:13px;font-weight:600;color:#f0ede6;margin-left:8px;">睡前不刷短视频</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">复盘</span>
+          <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">+子</span>
+        </div>
+      </div>
+      <div style="padding:12px 14px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span style="font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(107,168,130,0.12);color:#6ba882;">点亮</span>
+          <span style="font-size:13px;font-weight:600;color:#f0ede6;margin-left:8px;">每天25分钟</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">复盘</span>
+          <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">+子</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Events timeline -->
+    <div style="padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="font-size:12px;font-weight:600;color:#8c8982;">最近 RSIP 事件</span>
+        <span style="font-size:10px;color:#545250;">最近 6 条</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(184,84,74,0.12);color:#b8544a;flex-shrink:0;">deactivated</span>
+          <span style="font-size:12px;color:#f0ede6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">手机不上床</span>
+          <span style="font-size:10px;color:#545250;font-family:monospace;flex-shrink:0;">06-05 23:41</span>
+        </div>
+        <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;flex-shrink:0;">activated</span>
+          <span style="font-size:12px;color:#f0ede6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">每天25分钟</span>
+          <span style="font-size:10px;color:#545250;font-family:monospace;flex-shrink:0;">06-04 08:15</span>
+        </div>
+        <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;flex-shrink:0;">created</span>
+          <span style="font-size:12px;color:#f0ede6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">饭后10分钟内洗碗</span>
+          <span style="font-size:10px;color:#545250;font-family:monospace;flex-shrink:0;">06-03 14:22</span>
+        </div>
+        <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:9px;padding:2px 7px;border-radius:8px;background:rgba(184,84,74,0.12);color:#b8544a;flex-shrink:0;">rollback</span>
+          <span style="font-size:12px;color:#f0ede6;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">睡前不刷短视频</span>
+          <span style="font-size:10px;color:#545250;font-family:monospace;flex-shrink:0;">06-02 19:30</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons" style="margin-top:16px;">
+  <div class="pros"><h4>方案 A 优点</h4><ul><li>定式树和事件各占一栏，视觉平衡</li><li>创建按钮在顶部操作栏，不占内容区</li><li>事件列表紧凑横向排列，不抢定式树注意力</li><li>整体结构清晰：操作→指标→内容双栏</li></ul></div>
+  <div class="cons"><h4>方案 A 缺点</h4><ul><li>事件列表在右栏，树少时右栏仍占空间</li><li>适合中大型屏幕，窄屏需堆叠</li></ul></div>
+</div>
+
+---
+
+<div class="section" style="margin-top:28px;">
+  <h3>方案 B — 树为主体，事件横向时间线置底</h3>
+  <p class="subtitle">定式树独占全宽主区域，底部一条横向事件时间线，创建按钮悬浮</p>
+</div>
+
+<div style="background:#131316;border:1px solid #1e1e22;border-radius:8px;overflow:hidden;">
+  <!-- Header -->
+  <div style="padding:14px 20px;border-bottom:1px solid #1e1e22;display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <span style="font-size:16px;font-weight:600;color:#f0ede6;">RSIP 定式树</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span style="padding:6px 12px;border:1px solid #1e1e22;border-radius:14px;font-size:11px;color:#8c8982;">定式树</span>
+      <span style="padding:6px 12px;border-radius:14px;font-size:11px;color:#545250;">目标</span>
+      <span style="padding:6px 14px;background:#df9a3c;color:#0b0b0d;border-radius:14px;font-size:11px;font-weight:500;">新建目标转译</span>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #1e1e22;">
+    <div style="padding:10px 16px;text-align:center;border-right:1px solid #1e1e22;"><span style="font-size:18px;font-weight:600;color:#f0ede6;">9</span><span style="font-size:10px;color:#545250;display:block;">定式</span></div>
+    <div style="padding:10px 16px;text-align:center;border-right:1px solid #1e1e22;"><span style="font-size:18px;font-weight:600;color:#6ba882;">5</span><span style="font-size:10px;color:#545250;display:block;">点亮</span></div>
+    <div style="padding:10px 16px;text-align:center;border-right:1px solid #1e1e22;"><span style="font-size:18px;font-weight:600;color:#8c8982;">4</span><span style="font-size:10px;color:#545250;display:block;">未点亮</span></div>
+    <div style="padding:10px 16px;text-align:center;"><span style="font-size:18px;font-weight:600;color:#f0ede6;">3</span><span style="font-size:10px;color:#545250;display:block;">Goals</span></div>
+  </div>
+
+  <!-- Tree - full width -->
+  <div style="padding:16px;">
+    <div style="padding:12px 14px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:6px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <span style="font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(107,168,130,0.12);color:#6ba882;">点亮</span>
+        <span style="font-size:13px;font-weight:600;color:#f0ede6;margin-left:8px;">手机不上床</span>
+        <span style="font-size:11px;color:#545250;margin-left:10px;">子定式 2 · active 1</span>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">复盘</span>
+        <span style="padding:4px 10px;border:1px solid #252528;border-radius:4px;font-size:10px;color:#8c8982;">+子</span>
+        <span style="padding:4px 10px;background:rgba(184,84,74,0.12);color:#b8544a;border:1px solid rgba(184,84,74,0.2);border-radius:4px;font-size:10px;">熄灭</span>
+      </div>
+    </div>
+    <div style="padding:12px 14px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:6px;margin-bottom:8px;margin-left:20px;">
+      <span style="font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(140,137,130,0.08);color:#545250;">未点亮</span>
+      <span style="font-size:13px;font-weight:600;color:#f0ede6;margin-left:8px;">睡前不刷短视频</span>
+    </div>
+    <div style="padding:12px 14px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:6px;">
+      <span style="font-size:11px;padding:2px 7px;border-radius:999px;background:rgba(107,168,130,0.12);color:#6ba882;">点亮</span>
+      <span style="font-size:13px;font-weight:600;color:#f0ede6;margin-left:8px;">每天25分钟</span>
+    </div>
+  </div>
+
+  <!-- Horizontal event timeline at bottom -->
+  <div style="border-top:1px solid #1e1e22;padding:12px 16px;background:rgba(11,11,13,0.6);">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:11px;color:#545250;flex-shrink:0;">最近事件</span>
+      <div style="display:flex;gap:8px;overflow-x:auto;flex:1;">
+        <span style="padding:4px 10px;border-radius:12px;background:rgba(184,84,74,0.08);border:1px solid rgba(184,84,74,0.15);font-size:10px;color:#b8544a;white-space:nowrap;flex-shrink:0;">手机不上床 deactivated 06-05</span>
+        <span style="padding:4px 10px;border-radius:12px;background:rgba(107,168,130,0.08);border:1px solid rgba(107,168,130,0.15);font-size:10px;color:#6ba882;white-space:nowrap;flex-shrink:0;">每天25分钟 activated 06-04</span>
+        <span style="padding:4px 10px;border-radius:12px;background:rgba(107,168,130,0.08);border:1px solid rgba(107,168,130,0.15);font-size:10px;color:#6ba882;white-space:nowrap;flex-shrink:0;">洗碗 created 06-03</span>
+        <span style="padding:4px 10px;border-radius:12px;background:rgba(201,138,70,0.08);border:1px solid rgba(201,138,70,0.15);font-size:10px;color:#c98a46;white-space:nowrap;flex-shrink:0;">rollback 06-02</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating action button -->
+  <div style="position:relative;height:1px;">
+    <div style="position:absolute;bottom:16px;right:20px;">
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:10px 20px;background:#df9a3c;color:#0b0b0d;border-radius:20px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(223,154,60,0.2);">+ 创建定式</span>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons" style="margin-top:16px;">
+  <div class="pros"><h4>方案 B 优点</h4><ul><li>定式树是全页主角，不受侧栏干扰</li><li>事件时间线紧凑不占地</li><li>浮动创建按钮视觉轻量</li><li>适合树节点较多的场景</li></ul></div>
+  <div class="cons"><h4>方案 B 缺点</h4><ul><li>事件信息密度低（横向滚动可读性一般）</li><li>浮动按钮可能遮挡内容</li><li>创建定式的关联上下文（父定式选择）离树较远</li></ul></div>
+</div>

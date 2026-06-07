@@ -10,6 +10,7 @@ import FocusSessionPage from './pages/FocusSession';
 import History from './pages/History';
 import Review from './pages/Review';
 import RSIP from './pages/RSIP';
+import RSIPReview from './pages/RSIPReview';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/chains/:id/focus" element={<FocusSessionPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/review" element={<Review />} />
+            <Route path="/rsip-review" element={<RSIPReview />} />
             <Route path="/rsip" element={<RSIP />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/data-management" element={<DataManagement />} />

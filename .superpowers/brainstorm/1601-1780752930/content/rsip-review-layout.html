@@ -1,0 +1,170 @@
+<h2>RSIPReview 新布局 — Master-Detail</h2>
+<p class="subtitle">左侧：定式列表（可滚动）· 右侧：选中定式的详情面板</p>
+
+<div class="section">
+  <h3>定式复盘 Tab — 双栏布局</h3>
+  <p class="subtitle">点击左侧列表项或从 RSIP 页面跳转（?formula=123），右侧展开详情</p>
+</div>
+
+<div class="split">
+  <!-- LEFT: Formula List -->
+  <div style="background:#131316;border:1px solid #1e1e22;border-radius:8px;overflow:hidden;">
+    <div style="padding:14px 16px;border-bottom:1px solid #1e1e22;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;color:#8c8982;font-weight:500">9 个定式</span>
+      <span style="font-size:11px;color:#545250">按风险排序</span>
+    </div>
+    <div style="max-height:560px;overflow-y:auto;">
+      <!-- Item 1 - selected -->
+      <div style="padding:16px;border-bottom:1px solid #1e1e22;border-left:3px solid #df9a3c;background:rgba(223,154,60,0.06);cursor:pointer;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+          <div>
+            <div style="font-size:10px;color:#545250;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px;">早睡</div>
+            <div style="font-size:14px;font-weight:600;color:#f0ede6;">手机不上床</div>
+          </div>
+          <span style="font-size:11px;padding:3px 9px;border-radius:999px;color:#b8544a;background:rgba(184,84,74,0.12);border:1px solid rgba(184,84,74,0.2);">高风险</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">1/2</span> active</div>
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#b8544a;font-weight:600;">3</span> 熄灭</div>
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#b8544a;font-weight:600;">1</span> 回滚</div>
+          <div style="font-size:12px;color:#8c8982;">风险 <span style="color:#df9a3c;font-weight:600;">14</span></div>
+        </div>
+      </div>
+      <!-- Item 2 -->
+      <div style="padding:14px 16px;border-bottom:1px solid #1e1e22;border-left:3px solid transparent;cursor:pointer;transition:background 0.15s;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+          <div>
+            <div style="font-size:10px;color:#545250;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px;">稳定学习</div>
+            <div style="font-size:14px;font-weight:600;color:#f0ede6;">每天25分钟</div>
+          </div>
+          <span style="font-size:11px;padding:3px 9px;border-radius:999px;color:#c98a46;background:rgba(201,138,70,0.12);border:1px solid rgba(201,138,70,0.2);">关注</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">1/1</span> active</div>
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">0</span> 熄灭</div>
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">0</span> 回滚</div>
+          <div style="font-size:12px;color:#8c8982;">风险 <span style="color:#c98a46;font-weight:600;">2</span></div>
+        </div>
+      </div>
+      <!-- Item 3 -->
+      <div style="padding:14px 16px;border-bottom:1px solid #1e1e22;border-left:3px solid transparent;cursor:pointer;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+          <div>
+            <div style="font-size:10px;color:#545250;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:3px;">未连接目标</div>
+            <div style="font-size:14px;font-weight:600;color:#f0ede6;">饭后10分钟内洗碗</div>
+          </div>
+          <span style="font-size:11px;padding:3px 9px;border-radius:999px;color:#6ba882;background:rgba(107,168,130,0.12);border:1px solid rgba(107,168,130,0.2);">稳定</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">0/0</span> active</div>
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">0</span> 熄灭</div>
+          <div style="font-size:12px;color:#8c8982;"><span style="color:#f0ede6;font-weight:600;">0</span> 回滚</div>
+          <div style="font-size:12px;color:#8c8982;">风险 <span style="color:#6ba882;font-weight:600;">0</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Detail Panel -->
+  <div style="background:#131316;border:1px solid #1e1e22;border-radius:8px;padding:20px;max-height:560px;overflow-y:auto;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+      <span style="font-size:10px;padding:2px 8px;border-radius:999px;background:rgba(184,84,74,0.12);color:#b8544a;">未点亮</span>
+      <span style="font-size:10px;color:#545250;text-transform:uppercase;letter-spacing:0.6px;">早睡</span>
+    </div>
+
+    <!-- Title & Description Editing -->
+    <div style="margin-bottom:14px;">
+      <div style="font-size:11px;color:#545250;margin-bottom:4px;">定式标题</div>
+      <input style="width:100%;padding:8px 10px;background:#1a1a1f;border:1px solid #252528;border-radius:4px;color:#f0ede6;font-size:14px;font-weight:600;margin-bottom:10px;" value="手机不上床">
+      <div style="font-size:11px;color:#545250;margin-bottom:4px;">执行说明</div>
+      <textarea rows="2" style="width:100%;padding:8px 10px;background:#1a1a1f;border:1px solid #252528;border-radius:4px;color:#8c8982;font-size:12px;resize:vertical;">上床前手机放到书桌充电，不带上床。</textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+        <button style="padding:6px 14px;background:#df9a3c;color:#0b0b0d;border:none;border-radius:4px;font-weight:500;font-size:12px;cursor:pointer;">保存</button>
+      </div>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;">
+      <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;">
+        <div style="font-size:10px;color:#545250;margin-bottom:2px;">创建</div>
+        <div style="font-size:12px;color:#f0ede6;font-family:monospace;">06-03 14:22</div>
+      </div>
+      <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;">
+        <div style="font-size:10px;color:#545250;margin-bottom:2px;">点亮</div>
+        <div style="font-size:12px;color:#f0ede6;font-family:monospace;">06-04 08:15</div>
+      </div>
+      <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;">
+        <div style="font-size:10px;color:#545250;margin-bottom:2px;">熄灭</div>
+        <div style="font-size:12px;color:#b8544a;font-family:monospace;">06-05 23:41</div>
+      </div>
+      <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;">
+        <div style="font-size:10px;color:#545250;margin-bottom:2px;">依赖子定式</div>
+        <div style="font-size:12px;color:#f0ede6;font-weight:600;">1/2 active</div>
+      </div>
+      <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;">
+        <div style="font-size:10px;color:#545250;margin-bottom:2px;">回滚影响</div>
+        <div style="font-size:12px;color:#b8544a;font-weight:600;">1 次</div>
+      </div>
+      <div style="padding:10px 12px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;">
+        <div style="font-size:10px;color:#545250;margin-bottom:2px;">风险分</div>
+        <div style="font-size:12px;color:#df9a3c;font-weight:600;">14</div>
+      </div>
+    </div>
+
+    <!-- Recent Deactivation Note -->
+    <div style="padding:10px 12px;background:#0b0b0d;border-left:3px solid #df9a3c;border-top:1px solid #1e1e22;border-right:1px solid #1e1e22;border-bottom:1px solid #1e1e22;border-radius:4px;margin-bottom:16px;">
+      <div style="font-size:10px;color:#545250;margin-bottom:4px;">最近熄灭裁定</div>
+      <div style="font-size:12px;color:#8c8982;">晚上又刷了2小时手机才睡</div>
+    </div>
+
+    <!-- Events Timeline -->
+    <div style="font-size:11px;color:#8c8982;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;">事件时间线</div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(184,84,74,0.12);color:#b8544a;">deactivated</span>
+        <span style="font-size:12px;color:#8c8982;font-family:monospace;">06-05 23:41</span>
+      </div>
+      <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;">activated</span>
+        <span style="font-size:12px;color:#8c8982;font-family:monospace;">06-04 08:15</span>
+      </div>
+      <div style="padding:8px 10px;background:#0b0b0d;border:1px solid #1e1e22;border-radius:4px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(107,168,130,0.12);color:#6ba882;">created</span>
+        <span style="font-size:12px;color:#8c8982;font-family:monospace;">06-03 14:22</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>汇总指标 — 顶部保留</h3>
+  <p class="subtitle">四个指标卡片 + 洞察条保持不动，提供全局视角</p>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;">
+  <div style="padding:14px 16px;background:#131316;border:1px solid #1e1e22;border-radius:8px;">
+    <div style="font-size:11px;color:#545250;">定式总数</div>
+    <div style="font-size:24px;font-weight:600;color:#f0ede6;">9</div>
+    <div style="font-size:11px;color:#545250;">根定式与子定式合计</div>
+  </div>
+  <div style="padding:14px 16px;background:#131316;border:1px solid rgba(107,168,130,0.22);border-radius:8px;">
+    <div style="font-size:11px;color:#545250;">点亮</div>
+    <div style="font-size:24px;font-weight:600;color:#f0ede6;">5</div>
+    <div style="font-size:11px;color:#545250;">4 个未点亮</div>
+  </div>
+  <div style="padding:14px 16px;background:#131316;border:1px solid rgba(184,84,74,0.25);border-radius:8px;">
+    <div style="font-size:11px;color:#545250;">熄灭事件</div>
+    <div style="font-size:24px;font-weight:600;color:#f0ede6;">3</div>
+    <div style="font-size:11px;color:#545250;">递归回滚 1 次</div>
+  </div>
+  <div style="padding:14px 16px;background:#131316;border:1px solid #1e1e22;border-radius:8px;">
+    <div style="font-size:11px;color:#545250;">目标</div>
+    <div style="font-size:24px;font-weight:600;color:#f0ede6;">3</div>
+    <div style="font-size:11px;color:#545250;">失败路径 5 条</div>
+  </div>
+</div>
+
+<div style="padding:11px 14px;background:rgba(223,154,60,0.10);border:1px solid rgba(223,154,60,0.30);border-left:3px solid #df9a3c;border-radius:6px;font-size:12px;color:#8c8982;">
+  优先复盘：<strong style="color:#f0ede6;">手机不上床</strong>，风险分 14 · 定式结构：根定式 3 个，子定式 6 个
+</div>
+</div>
