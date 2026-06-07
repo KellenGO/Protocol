@@ -20,6 +20,11 @@ interface FormulaNode extends RsipFormula {
   children: FormulaNode[];
 }
 
+type ActionFeedback = {
+  tone: 'success' | 'neutral';
+  text: string;
+};
+
 function buildTree(formulas: RsipFormula[]): FormulaNode[] {
   const map = new Map<number, FormulaNode>();
   formulas.forEach((f) => map.set(f.id, { ...f, children: [] }));
@@ -42,6 +47,7 @@ function buildTree(formulas: RsipFormula[]): FormulaNode[] {
 }
 
 export default function RSIP() {
+  const navigate = useNavigate();
   const [formulas, setFormulas] = useState<RsipFormula[]>([]);
   const [goals, setGoals] = useState<RsipGoal[]>([]);
   const [goalPaths, setGoalPaths] = useState<RsipFailurePath[]>([]);
@@ -53,6 +59,7 @@ export default function RSIP() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
   const [archivingGoalId, setArchivingGoalId] = useState<number | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [title, setTitle] = useState('');
@@ -84,6 +91,12 @@ export default function RSIP() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!actionFeedback) return;
+    const timer = window.setTimeout(() => setActionFeedback(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [actionFeedback]);
+
   async function handleCreate() {
     if (!title.trim()) {
       setFormError('定式标题不能为空');
@@ -92,8 +105,9 @@ export default function RSIP() {
     setCreating(true);
     setFormError('');
     try {
+      const createdTitle = title.trim();
       await createRsipFormula({
-        title: title.trim(),
+        title: createdTitle,
         description: description.trim(),
         parentId,
       });
@@ -102,6 +116,10 @@ export default function RSIP() {
       setParentId(null);
       setShowCreateForm(false);
       await reload();
+      setActionFeedback({
+        tone: 'success',
+        text: `已写入「${createdTitle}」，可以继续点亮、添加子定式或进入复盘。`,
+      });
     } catch (err) {
       setFormError(String(err));
     } finally {
@@ -112,9 +130,14 @@ export default function RSIP() {
   async function handleActivate(id: number) {
     setWorkingId(id);
     setError('');
+    setActionFeedback(null);
     try {
       await activateRsipFormula(id);
       await reload();
+      setActionFeedback({
+        tone: 'success',
+        text: `已点亮「${formulas.find((formula) => formula.id === id)?.title ?? `#${id}`}」。`,
+      });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -125,9 +148,14 @@ export default function RSIP() {
   async function handleDeactivate(id: number) {
     setWorkingId(id);
     setError('');
+    setActionFeedback(null);
     try {
       await deactivateRsipFormula(id);
       await reload();
+      setActionFeedback({
+        tone: 'success',
+        text: `已熄灭「${formulas.find((formula) => formula.id === id)?.title ?? `#${id}`}」，关联子定式会同步回滚。`,
+      });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -139,8 +167,13 @@ export default function RSIP() {
     setSelectedGoalId(goalId);
     setViewMode('goals');
     setError('');
+    setActionFeedback(null);
     try {
       setGoalPaths(await getFailurePaths(goalId));
+      setActionFeedback({
+        tone: 'neutral',
+        text: `已载入「${goals.find((goal) => goal.id === goalId)?.title ?? `#${goalId}`}」的失败路径和关联定式。`,
+      });
     } catch (err) {
       setError(String(err));
     }
@@ -149,13 +182,19 @@ export default function RSIP() {
   async function handleArchiveGoal(goalId: number) {
     setArchivingGoalId(goalId);
     setError('');
+    setActionFeedback(null);
     try {
+      const archivedTitle = goals.find((goal) => goal.id === goalId)?.title ?? `#${goalId}`;
       await archiveRsipGoal(goalId);
       if (selectedGoalId === goalId) {
         setSelectedGoalId(null);
         setGoalPaths([]);
       }
       await reload();
+      setActionFeedback({
+        tone: 'success',
+        text: `已归档「${archivedTitle}」，列表会隐藏这个目标。`,
+      });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -168,6 +207,10 @@ export default function RSIP() {
     setSelectedGoalId(goalId);
     await reload();
     setViewMode('tree');
+    setActionFeedback({
+      tone: 'success',
+      text: `目标转译完成：已生成「${_formula.title}」，现在可以点亮或进入复盘。`,
+    });
   }
 
   return (
@@ -211,6 +254,9 @@ export default function RSIP() {
           </button>
           <button className="btn btn-primary" onClick={() => setWizardOpen(true)}>
             新建目标转译
+          </button>
+          <button className="btn btn-secondary" onClick={() => navigate('/rsip-review')}>
+            打开复盘
           </button>
         </div>
       </div>
@@ -277,6 +323,21 @@ export default function RSIP() {
         </div>
       </div>
 
+      {actionFeedback && (
+        <div className={`rsip-feedback-toast ${actionFeedback.tone}`} role="status" aria-live="polite">
+          <div className="rsip-feedback-toast-marker" />
+          <p>{actionFeedback.text}</p>
+          <button
+            type="button"
+            className="rsip-feedback-toast-close"
+            aria-label="关闭 RSIP 操作提示"
+            onClick={() => setActionFeedback(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {error && <p className="form-error" role="alert">{error}</p>}
 
       {wizardOpen && (
@@ -311,7 +372,6 @@ export default function RSIP() {
                 <FormulaTreeNode
                   key={node.id}
                   node={node}
-                  depth={0}
                   workingId={workingId}
                   onAddChild={(id) => {
                     setParentId(id);
@@ -761,14 +821,12 @@ function parseFailurePathNodes(nodesJson: string): FailurePathNode[] {
 
 function FormulaTreeNode({
   node,
-  depth,
   workingId,
   onAddChild,
   onActivate,
   onDeactivate,
 }: {
   node: FormulaNode;
-  depth: number;
   workingId: number | null;
   onAddChild: (id: number) => void;
   onActivate: (id: number) => void;
@@ -780,7 +838,7 @@ function FormulaTreeNode({
 
   return (
     <div className="formula-node-wrap">
-      <div className="formula-node" style={{ marginLeft: depth * 22 }}>
+      <div className="formula-node">
         <div className="formula-node-main">
           <span className={`formula-status status-${node.status}`}>
             {node.status === 'active' ? '点亮' : '未点亮'}
@@ -826,17 +884,20 @@ function FormulaTreeNode({
           )}
         </div>
       </div>
-      {node.children.map((child) => (
-        <FormulaTreeNode
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          workingId={workingId}
-          onAddChild={onAddChild}
-          onActivate={onActivate}
-          onDeactivate={onDeactivate}
-        />
-      ))}
+      {node.children.length > 0 && (
+        <div className="formula-children-stack">
+          {node.children.map((child) => (
+            <FormulaTreeNode
+              key={child.id}
+              node={child}
+              workingId={workingId}
+              onAddChild={onAddChild}
+              onActivate={onActivate}
+              onDeactivate={onDeactivate}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

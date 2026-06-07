@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { getFormulaEvents, getRsipFormulas, getRsipGoals, updateRsipFormula } from '../lib/db';
 import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
 import type { FormulaEvent, RsipFormula, RsipGoal } from '../types';
@@ -35,6 +35,7 @@ export default function RSIPReview() {
   const [editDescription, setEditDescription] = useState('');
   const [savingDetail, setSavingDetail] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [detailMessage, setDetailMessage] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -72,6 +73,7 @@ export default function RSIPReview() {
     if (!selectedFormulaId || !editTitle.trim()) return;
     setSavingDetail(true);
     setDetailError('');
+    setDetailMessage('');
     try {
       await updateRsipFormula(selectedFormulaId, {
         title: editTitle.trim(),
@@ -79,6 +81,7 @@ export default function RSIPReview() {
       });
       const refreshed = await getRsipFormulas();
       setFormulas(refreshed);
+      setDetailMessage(`已保存「${editTitle.trim()}」的复盘编辑。`);
     } catch (err) {
       setDetailError(String(err));
     } finally {
@@ -93,16 +96,21 @@ export default function RSIPReview() {
           <h2>RSIP复盘</h2>
           <p className="page-subtitle">{RSIP_REVIEW_HINT}</p>
         </div>
-        <div className="rsip-review-tabs">
-          {TABS.map((item) => (
-            <button
-              key={item.key}
-              className={`rsip-review-tab ${tab === item.key ? 'active' : ''}`}
-              onClick={() => setTab(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="rsip-review-actions">
+          <Link className="btn btn-secondary" to="/rsip">
+            返回 RSIP 工作台
+          </Link>
+          <div className="rsip-review-tabs">
+            {TABS.map((item) => (
+              <button
+                key={item.key}
+                className={`rsip-review-tab ${tab === item.key ? 'active' : ''}`}
+                onClick={() => setTab(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -124,6 +132,8 @@ export default function RSIPReview() {
               onSelect={(id) => {
                 setSelectedFormulaId(id);
                 setSearchParams({ formula: String(id) });
+                setDetailError('');
+                setDetailMessage('');
                 const item = review.priorityFormulas.find((i) => i.formula.id === id);
                 if (item) {
                   setEditTitle(item.formula.title);
@@ -137,6 +147,7 @@ export default function RSIPReview() {
               setEditDescription={setEditDescription}
               saving={savingDetail}
               error={detailError}
+              message={detailMessage}
             />
           )}
           {tab === 'events' && <EventReviewList events={events} />}
@@ -205,6 +216,7 @@ function FormulaMasterDetail({
   setEditDescription,
   saving,
   error,
+  message,
 }: {
   items: RsipFormulaReviewItem[];
   selectedId: number | null;
@@ -216,6 +228,7 @@ function FormulaMasterDetail({
   setEditDescription: (v: string) => void;
   saving: boolean;
   error: string;
+  message: string;
 }) {
   if (items.length === 0) {
     return (
@@ -278,6 +291,7 @@ function FormulaMasterDetail({
             onSave={onSave}
             saving={saving}
             error={error}
+            message={message}
           />
         )}
       </div>
@@ -294,6 +308,7 @@ function FormulaDetail({
   onSave,
   saving,
   error,
+  message,
 }: {
   item: RsipFormulaReviewItem;
   editTitle: string;
@@ -303,6 +318,7 @@ function FormulaDetail({
   onSave: () => void;
   saving: boolean;
   error: string;
+  message: string;
 }) {
   const { formula } = item;
 
@@ -330,6 +346,11 @@ function FormulaDetail({
           />
         </label>
         {error && <p className="form-error" role="alert">{error}</p>}
+        {message && (
+          <p className="rsip-inline-success" role="status" aria-live="polite">
+            {message}
+          </p>
+        )}
         <div className="rsip-detail-save-row">
           <button
             className="btn btn-primary"

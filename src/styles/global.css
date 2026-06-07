@@ -2042,6 +2042,68 @@ textarea,
   color: var(--text-secondary);
 }
 
+.rsip-feedback-toast {
+  position: fixed;
+  top: 28px;
+  right: 28px;
+  z-index: 120;
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) 24px;
+  gap: 12px;
+  align-items: start;
+  width: min(420px, calc(100vw - 56px));
+  padding: 14px 14px 14px 12px;
+  background: rgba(28, 27, 24, 0.96);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  animation: rsip-toast-in 0.22s ease-out;
+}
+
+.rsip-feedback-toast p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.rsip-feedback-toast-marker {
+  width: 4px;
+  min-height: 34px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.rsip-feedback-toast.success .rsip-feedback-toast-marker {
+  background: var(--success);
+}
+
+.rsip-feedback-toast-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rsip-feedback-toast-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+@keyframes rsip-toast-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* Main two-column layout */
 
 .rsip-main-layout {
@@ -2322,6 +2384,19 @@ textarea,
   gap: 8px;
 }
 
+.formula-children-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: 20px;
+  padding: 10px 0 0 18px;
+  border-left: 1px solid var(--border-default);
+}
+
+.formula-children-stack .formula-node {
+  background: rgba(255, 255, 255, 0.015);
+}
+
 .formula-node {
   display: flex;
   justify-content: space-between;
@@ -2600,6 +2675,12 @@ textarea,
 }
 
 @media (max-width: 520px) {
+  .rsip-feedback-toast {
+    top: 18px;
+    right: 16px;
+    width: calc(100vw - 32px);
+  }
+
   .rsip-stats-bar {
     grid-template-columns: 1fr;
   }
@@ -3602,6 +3683,13 @@ textarea,
   flex-shrink: 0;
 }
 
+.rsip-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .rsip-review-tab {
   padding: 7px 16px;
   border: none;
@@ -3624,6 +3712,17 @@ textarea,
   background: var(--gold-subtle);
   color: var(--gold);
   font-weight: 500;
+}
+
+.rsip-inline-success {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(107, 168, 130, 0.22);
+  border-radius: var(--radius-sm);
+  background: var(--success-subtle);
+  color: var(--success);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* Overview card */
@@ -3709,6 +3808,11 @@ textarea,
   .rsip-review-header {
     flex-direction: column;
     gap: 14px;
+  }
+
+  .rsip-review-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .rsip-overview-stats {
