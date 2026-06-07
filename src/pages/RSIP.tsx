@@ -12,6 +12,7 @@ import {
   getFailurePaths,
   getRsipGoals,
   getRsipFormulas,
+  updateRsipFormula,
 } from '../lib/db';
 import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
 import type { FailurePathNode, FormulaEvent, RsipFailurePath, RsipFormula, RsipGoal } from '../types';
@@ -66,6 +67,7 @@ export default function RSIP() {
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [expandedFormulaIds, setExpandedFormulaIds] = useState<Set<number>>(() => new Set());
   const [selectedFormulaId, setSelectedFormulaId] = useState<number | null>(null);
+  const [focusedRootId, setFocusedRootId] = useState<number | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [title, setTitle] = useState('');
@@ -73,6 +75,11 @@ export default function RSIP() {
   const [parentId, setParentId] = useState<number | null>(null);
   const [formError, setFormError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [editingFormulaId, setEditingFormulaId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editError, setEditError] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const tree = useMemo(() => buildTree(formulas), [formulas]);
   const activeCount = formulas.filter((f) => f.status === 'active').length;
@@ -80,6 +87,9 @@ export default function RSIP() {
     ? formulas.find((formula) => formula.id === selectedFormulaId) ?? null
     : null;
   const selectedFormulaNode = selectedFormulaId ? findFormulaNode(tree, selectedFormulaId) : null;
+  const focusedRootNode = focusedRootId ? findFormulaNode(tree, focusedRootId) : null;
+  const focusedPath = focusedRootId ? findFormulaPath(tree, focusedRootId) : [];
+  const visibleTree = focusedRootNode ? [focusedRootNode] : tree;
   const currentGoal = goals.find((goal) => goal.id === selectedGoalId) ?? null;
   const goalFormulas = selectedGoalId
     ? formulas.filter((formula) => formula.goal_id === selectedGoalId)
@@ -115,7 +125,10 @@ export default function RSIP() {
     if (!selectedFormulaId || !formulas.some((formula) => formula.id === selectedFormulaId)) {
       setSelectedFormulaId(tree[0].id);
     }
-  }, [formulas, selectedFormulaId, tree]);
+    if (focusedRootId && !formulas.some((formula) => formula.id === focusedRootId)) {
+      setFocusedRootId(null);
+    }
+  }, [focusedRootId, formulas, selectedFormulaId, tree]);
 
   async function handleCreate() {
     if (!title.trim()) {
@@ -149,6 +162,7 @@ export default function RSIP() {
       await reload();
       if (createdParentId) {
         setExpandedFormulaIds((current) => new Set(current).add(createdParentId));
+        setFocusedRootId(createdParentId);
       }
       setSelectedFormulaId(created.id);
       setActionFeedback({
@@ -198,6 +212,58 @@ export default function RSIP() {
     }
   }
 
+  function startEditFormula(formula: RsipFormula) {
+    setEditingFormulaId(formula.id);
+    setEditTitle(formula.title);
+    setEditDescription(formula.description);
+    setEditError('');
+  }
+
+  function cancelEditFormula() {
+    setEditingFormulaId(null);
+    setEditTitle('');
+    setEditDescription('');
+    setEditError('');
+  }
+
+  async function handleSaveFormulaEdit(formula: RsipFormula) {
+    if (!editTitle.trim()) {
+      setEditError('定式标题不能为空。');
+      return;
+    }
+    const normalizedTitle = normalizeFormulaTitle(editTitle);
+    const duplicateSibling = formulas.some(
+      (item) =>
+        item.id !== formula.id &&
+        item.parent_id === formula.parent_id &&
+        normalizeFormulaTitle(item.title) === normalizedTitle,
+    );
+    if (duplicateSibling) {
+      setEditError(formula.parent_id ? '同一父定式下不能改成同名子定式。' : '同一层级下已经有同名定式。');
+      return;
+    }
+
+    setSavingEdit(true);
+    setEditError('');
+    try {
+      await updateRsipFormula(formula.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim(),
+      });
+      await reload();
+      setEditingFormulaId(null);
+      setSelectedFormulaId(formula.id);
+      setActionFeedback({
+        tone: 'success',
+        text: `已更新「${editTitle.trim()}」。`,
+      });
+    } catch (err) {
+      setEditError(String(err));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   async function handleViewGoal(goalId: number) {
     setSelectedGoalId(goalId);
     setViewMode('goals');
@@ -244,6 +310,7 @@ export default function RSIP() {
     setViewMode('tree');
     if (_formula.parent_id) {
       setExpandedFormulaIds((current) => new Set(current).add(_formula.parent_id!));
+      setFocusedRootId(_formula.parent_id);
     }
     setSelectedFormulaId(_formula.id);
     setActionFeedback({
@@ -426,20 +493,35 @@ export default function RSIP() {
               </p>
             </div>
           ) : (
-            <div className="formula-tree">
-              {tree.map((node) => (
-                <FormulaTreeNode
-                  key={node.id}
-                  node={node}
-                  depth={0}
-                  selectedFormulaId={selectedFormulaId}
-                  expandedFormulaIds={expandedFormulaIds}
-                  onSelect={setSelectedFormulaId}
-                  onToggleChildren={toggleFormulaChildren}
-                  onExpandSubtree={expandFormulaSubtree}
-                />
-              ))}
-            </div>
+            <>
+              <FormulaTreeBreadcrumb
+                path={focusedPath}
+                onShowAll={() => setFocusedRootId(null)}
+                onEnter={(id) => {
+                  setFocusedRootId(id);
+                  setSelectedFormulaId(id);
+                }}
+              />
+              <div className="formula-tree">
+                {visibleTree.map((node) => (
+                  <FormulaTreeNode
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    selectedFormulaId={selectedFormulaId}
+                    expandedFormulaIds={expandedFormulaIds}
+                    onSelect={setSelectedFormulaId}
+                    onToggleChildren={toggleFormulaChildren}
+                    onEnterSubtree={(id) => {
+                      setFocusedRootId(id);
+                      setSelectedFormulaId(id);
+                      setExpandedFormulaIds((current) => new Set(current).add(id));
+                    }}
+                    onExpandSubtree={expandFormulaSubtree}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </section>
 
@@ -451,6 +533,16 @@ export default function RSIP() {
               ? formulas.find((formula) => formula.id === selectedFormula.parent_id) ?? null
               : null}
             workingId={workingId}
+            editing={editingFormulaId === selectedFormula?.id}
+            editTitle={editTitle}
+            editDescription={editDescription}
+            editError={editError}
+            savingEdit={savingEdit}
+            onStartEdit={startEditFormula}
+            onCancelEdit={cancelEditFormula}
+            onSaveEdit={handleSaveFormulaEdit}
+            setEditTitle={setEditTitle}
+            setEditDescription={setEditDescription}
             onReview={(id) => navigate(`/rsip-review?formula=${id}`)}
             onAddChild={(id) => {
               setParentId(id);
@@ -911,6 +1003,16 @@ function FormulaDetailPanel({
   node,
   parentFormula,
   workingId,
+  editing,
+  editTitle,
+  editDescription,
+  editError,
+  savingEdit,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  setEditTitle,
+  setEditDescription,
   onReview,
   onAddChild,
   onActivate,
@@ -921,6 +1023,16 @@ function FormulaDetailPanel({
   node: FormulaNode | null;
   parentFormula: RsipFormula | null;
   workingId: number | null;
+  editing: boolean;
+  editTitle: string;
+  editDescription: string;
+  editError: string;
+  savingEdit: boolean;
+  onStartEdit: (formula: RsipFormula) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (formula: RsipFormula) => void;
+  setEditTitle: (value: string) => void;
+  setEditDescription: (value: string) => void;
   onReview: (id: number) => void;
   onAddChild: (id: number) => void;
   onActivate: (id: number) => void;
@@ -952,10 +1064,46 @@ function FormulaDetailPanel({
           </span>
           <h3>{formula.title}</h3>
         </div>
-        <button className="btn btn-secondary" onClick={() => onReview(formula.id)}>
-          复盘
-        </button>
+        <div className="rsip-detail-head-actions">
+          <button className="btn btn-secondary" onClick={() => onReview(formula.id)}>
+            复盘
+          </button>
+          <button className="btn btn-secondary" onClick={() => onStartEdit(formula)}>
+            编辑
+          </button>
+        </div>
       </div>
+
+      {editing && (
+        <div className="rsip-detail-edit">
+          <label className="form-field">
+            <span>定式标题</span>
+            <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>执行说明</span>
+            <textarea
+              rows={4}
+              value={editDescription}
+              onChange={(event) => setEditDescription(event.target.value)}
+              placeholder="写清触发条件、完成标准和例外边界"
+            />
+          </label>
+          {editError && <p className="form-error" role="alert">{editError}</p>}
+          <div className="rsip-detail-save-row">
+            <button className="btn btn-secondary" disabled={savingEdit} onClick={onCancelEdit}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={savingEdit || !editTitle.trim()}
+              onClick={() => onSaveEdit(formula)}
+            >
+              {savingEdit ? '保存中...' : '保存编辑'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="rsip-detail-metrics">
         <div className="review-metric review-metric-neutral">
@@ -1006,6 +1154,39 @@ function FormulaDetailPanel({
   );
 }
 
+function FormulaTreeBreadcrumb({
+  path,
+  onShowAll,
+  onEnter,
+}: {
+  path: FormulaNode[];
+  onShowAll: () => void;
+  onEnter: (id: number) => void;
+}) {
+  if (path.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="formula-tree-breadcrumb" aria-label="当前子树路径">
+      <button type="button" onClick={onShowAll}>
+        全部定式
+      </button>
+      {path.map((node) => (
+        <span key={node.id} className="formula-tree-breadcrumb-item">
+          <span aria-hidden="true">/</span>
+          <button
+            type="button"
+            onClick={() => onEnter(node.id)}
+          >
+            {node.title}
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function FormulaTreeNode({
   node,
   depth,
@@ -1013,6 +1194,7 @@ function FormulaTreeNode({
   expandedFormulaIds,
   onSelect,
   onToggleChildren,
+  onEnterSubtree,
   onExpandSubtree,
 }: {
   node: FormulaNode;
@@ -1021,6 +1203,7 @@ function FormulaTreeNode({
   expandedFormulaIds: Set<number>;
   onSelect: (id: number) => void;
   onToggleChildren: (id: number, subtreeIds: number[]) => void;
+  onEnterSubtree: (id: number) => void;
   onExpandSubtree: (ids: number[]) => void;
 }) {
   const activeChildren = countActive(node.children);
@@ -1030,11 +1213,13 @@ function FormulaTreeNode({
   const canExpandSubtree =
     depth === 0 && expandableIds.length > 1 && expandableIds.some((id) => !expandedFormulaIds.has(id));
   const isSelected = selectedFormulaId === node.id;
+  const shouldEnterSubtree = depth >= 4 && hasChildren;
+  const canToggleChildren = hasChildren && !shouldEnterSubtree;
 
   return (
     <div className="formula-node-wrap">
       <div className={`formula-tree-row ${isSelected ? 'selected' : ''}`}>
-        {hasChildren ? (
+        {canToggleChildren ? (
           <button
             type="button"
             className="formula-tree-expander"
@@ -1061,7 +1246,7 @@ function FormulaTreeNode({
           <span className="formula-tree-meta">子 {node.children.length} · 亮 {activeChildren}</span>
         </button>
 
-        {canExpandSubtree && (
+        {!shouldEnterSubtree && canExpandSubtree && (
           <button
             type="button"
             className="formula-tree-expand-all"
@@ -1071,7 +1256,18 @@ function FormulaTreeNode({
           </button>
         )}
       </div>
-      {hasChildren && isExpanded && (
+      {shouldEnterSubtree && (
+        <div className="formula-tree-subtree-action">
+          <button
+            type="button"
+            className="formula-tree-expand-all"
+            onClick={() => onEnterSubtree(node.id)}
+          >
+            进入子树
+          </button>
+        </div>
+      )}
+      {canToggleChildren && isExpanded && (
         <div className="formula-children-stack">
           {node.children.map((child) => (
             <FormulaTreeNode
@@ -1082,6 +1278,7 @@ function FormulaTreeNode({
               expandedFormulaIds={expandedFormulaIds}
               onSelect={onSelect}
               onToggleChildren={onToggleChildren}
+              onEnterSubtree={onEnterSubtree}
               onExpandSubtree={onExpandSubtree}
             />
           ))}
@@ -1107,6 +1304,15 @@ function findFormulaNode(nodes: FormulaNode[], id: number): FormulaNode | null {
     if (child) return child;
   }
   return null;
+}
+
+function findFormulaPath(nodes: FormulaNode[], id: number): FormulaNode[] {
+  for (const node of nodes) {
+    if (node.id === id) return [node];
+    const childPath = findFormulaPath(node.children, id);
+    if (childPath.length > 0) return [node, ...childPath];
+  }
+  return [];
 }
 
 function countActive(nodes: FormulaNode[]): number {
