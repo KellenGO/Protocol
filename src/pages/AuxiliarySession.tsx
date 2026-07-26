@@ -157,7 +157,9 @@ export default function AuxiliarySessionPage() {
     if (deadlineError || remaining !== 0) return;
     if (phase === 'countdown' && reservation) {
       const timeState = resolveReservationTimeState(reservation);
-      if (timeState.phase === 'confirming') {
+      if (timeState.phase === 'invalid') {
+        setError(timeState.error);
+      } else if (timeState.phase === 'confirming') {
         setReservation({ ...reservation, phase: 'confirming' });
         setPhase('confirming');
       } else if (timeState.phase === 'expired') {

@@ -2,7 +2,8 @@ export type ReservationCountdownPhase = 'countdown' | 'confirming';
 
 export type ReservationTimeState =
   | { phase: 'countdown' | 'confirming'; remainingSeconds: number }
-  | { phase: 'expired'; remainingSeconds: 0 };
+  | { phase: 'expired'; remainingSeconds: 0 }
+  | { phase: 'invalid'; error: string };
 
 export interface ReservationDeadlineSource {
   due_at: string;
@@ -57,17 +58,24 @@ export function resolveReservationTimeState(
   reservation: ReservationDeadlineSource,
   nowMs = Date.now(),
 ): ReservationTimeState {
-  const reservationRemaining = calculateRemainingSeconds(reservation.due_at, nowMs);
-  if (reservationRemaining > 0) {
-    return { phase: 'countdown', remainingSeconds: reservationRemaining };
-  }
+  try {
+    const reservationRemaining = calculateRemainingSeconds(reservation.due_at, nowMs);
+    if (reservationRemaining > 0) {
+      return { phase: 'countdown', remainingSeconds: reservationRemaining };
+    }
 
-  const confirmationRemaining = calculateRemainingSeconds(
-    reservation.confirmation_due_at ?? reservation.due_at,
-    nowMs,
-  );
-  if (confirmationRemaining > 0) {
-    return { phase: 'confirming', remainingSeconds: confirmationRemaining };
+    const confirmationRemaining = calculateRemainingSeconds(
+      reservation.confirmation_due_at ?? reservation.due_at,
+      nowMs,
+    );
+    if (confirmationRemaining > 0) {
+      return { phase: 'confirming', remainingSeconds: confirmationRemaining };
+    }
+    return { phase: 'expired', remainingSeconds: 0 };
+  } catch (error) {
+    return {
+      phase: 'invalid',
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
-  return { phase: 'expired', remainingSeconds: 0 };
 }

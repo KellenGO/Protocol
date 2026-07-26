@@ -68,3 +68,13 @@ test('converges reservation state from both absolute deadlines', () => {
     { phase: 'expired', remainingSeconds: 0 },
   );
 });
+
+test('reports an invalid confirmation deadline after the reservation deadline', () => {
+  const reservation = {
+    due_at: '2026-07-26 12:00:00',
+    confirmation_due_at: 'not-a-time',
+  };
+  const state = resolveReservationTimeState(reservation, Date.UTC(2026, 6, 26, 12, 2, 0));
+  assert.equal(state.phase, 'invalid');
+  if (state.phase === 'invalid') assert.match(state.error, /\S/);
+});
