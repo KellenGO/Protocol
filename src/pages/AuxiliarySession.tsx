@@ -10,6 +10,11 @@ import {
   getGlobalActiveReservationSession,
 } from '../lib/db';
 import { FAILURE_DEBUG_CATEGORIES } from '../features/ctdp/protocolOptions';
+import {
+  reservationDeadlineForPhase,
+  resolveReservationTimeState,
+} from '../features/ctdp/sessionTiming';
+import { useDeadlineCountdown } from '../features/ctdp/useDeadlineCountdown';
 import type {
   ActiveReservationSession,
   Chain,
@@ -45,13 +50,6 @@ function formatDateTime(raw: string): string {
   return new Date(raw + 'Z').toLocaleString('zh-CN');
 }
 
-function reservationTargetTime(reservation: ActiveReservationSession): number {
-  const target = reservation.phase === 'confirming'
-    ? reservation.confirmation_due_at ?? reservation.due_at
-    : reservation.due_at;
-  return new Date(target + 'Z').getTime();
-}
-
 function phaseFromReservation(reservation: ActiveReservationSession): Phase {
   if (reservation.phase === 'pending_ruling') return 'ruling';
   return reservation.phase === 'confirming' ? 'confirming' : 'countdown';
@@ -83,7 +81,6 @@ export default function AuxiliarySessionPage() {
   const [chain, setChain] = useState<Chain | null>(null);
   const [reservation, setReservation] = useState<ActiveReservationSession | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
-  const [remaining, setRemaining] = useState(0);
   const [error, setError] = useState('');
   const [doneResult, setDoneResult] = useState<DoneResult | null>(null);
   const [behaviorType, setBehaviorType] = useState(behaviorTypes[0]);
@@ -92,8 +89,18 @@ export default function AuxiliarySessionPage() {
   const [debugNote, setDebugNote] = useState('');
   const [rulingError, setRulingError] = useState('');
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const expiringRef = useRef(false);
+
+  const countdownPhase =
+    phase === 'countdown' || phase === 'confirming' ? phase : null;
+  const deadline =
+    reservation && countdownPhase
+      ? reservationDeadlineForPhase(reservation, countdownPhase)
+      : null;
+  const {
+    remainingSeconds: remaining,
+    deadlineError,
+  } = useDeadlineCountdown(deadline, countdownPhase !== null);
 
   const expireAuxiliary = useCallback(async () => {
     if (!reservation || expiringRef.current) return;
@@ -130,13 +137,8 @@ export default function AuxiliarySessionPage() {
           return;
         }
 
-        const nextPhase = phaseFromReservation(activeReservation);
-        const target = reservationTargetTime(activeReservation);
-        const left = Math.max(0, Math.ceil((target - Date.now()) / 1000));
-
         setReservation(activeReservation);
-        setRemaining(left);
-        setPhase(nextPhase);
+        setPhase(phaseFromReservation(activeReservation));
       } catch (err) {
         if (!cancelled) {
           setError(String(err));
@@ -152,32 +154,19 @@ export default function AuxiliarySessionPage() {
   }, [chainId]);
 
   useEffect(() => {
-    if (phase !== 'countdown' && phase !== 'confirming') return;
-
-    timerRef.current = setInterval(() => {
-      setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [phase]);
-
-  useEffect(() => {
-    if (remaining !== 0) return;
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    if (deadlineError || remaining !== 0) return;
     if (phase === 'countdown' && reservation) {
-      const confirmationTarget = new Date((reservation.confirmation_due_at ?? reservation.due_at) + 'Z').getTime();
-      setRemaining(Math.max(0, Math.ceil((confirmationTarget - Date.now()) / 1000)));
-      setReservation({ ...reservation, phase: 'confirming' });
-      setPhase('confirming');
+      const timeState = resolveReservationTimeState(reservation);
+      if (timeState.phase === 'confirming') {
+        setReservation({ ...reservation, phase: 'confirming' });
+        setPhase('confirming');
+      } else if (timeState.phase === 'expired') {
+        expireAuxiliary();
+      }
       return;
     }
     if (phase === 'confirming') expireAuxiliary();
-  }, [remaining, phase, expireAuxiliary, reservation]);
+  }, [deadlineError, remaining, phase, expireAuxiliary, reservation]);
 
   async function enterMainFromReservation() {
     if (!reservation) return;
@@ -266,7 +255,7 @@ export default function AuxiliarySessionPage() {
         <span className="session-state">{sessionStateLabel(phase)}</span>
       </div>
 
-      {error && <p className="action-error" role="alert">{error}</p>}
+      {(error || deadlineError) && <p className="action-error" role="alert">{error || deadlineError}</p>}
 
       {phase === 'empty' && (
         <div className="auxiliary-runtime" role="status" aria-live="polite">

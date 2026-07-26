@@ -1,5 +1,9 @@
 export type ReservationCountdownPhase = 'countdown' | 'confirming';
 
+export type ReservationTimeState =
+  | { phase: 'countdown' | 'confirming'; remainingSeconds: number }
+  | { phase: 'expired'; remainingSeconds: 0 };
+
 export interface ReservationDeadlineSource {
   due_at: string;
   confirmation_due_at: string | null;
@@ -47,4 +51,23 @@ export function reservationDeadlineForPhase(
     return reservation.confirmation_due_at ?? reservation.due_at;
   }
   return reservation.due_at;
+}
+
+export function resolveReservationTimeState(
+  reservation: ReservationDeadlineSource,
+  nowMs = Date.now(),
+): ReservationTimeState {
+  const reservationRemaining = calculateRemainingSeconds(reservation.due_at, nowMs);
+  if (reservationRemaining > 0) {
+    return { phase: 'countdown', remainingSeconds: reservationRemaining };
+  }
+
+  const confirmationRemaining = calculateRemainingSeconds(
+    reservation.confirmation_due_at ?? reservation.due_at,
+    nowMs,
+  );
+  if (confirmationRemaining > 0) {
+    return { phase: 'confirming', remainingSeconds: confirmationRemaining };
+  }
+  return { phase: 'expired', remainingSeconds: 0 };
 }

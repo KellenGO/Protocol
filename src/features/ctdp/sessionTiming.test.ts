@@ -4,6 +4,7 @@ import {
   calculateRemainingSeconds,
   parseSqliteUtcTimestamp,
   reservationDeadlineForPhase,
+  resolveReservationTimeState,
 } from './sessionTiming.js';
 
 test('rounds a future deadline up to the next whole second', () => {
@@ -47,4 +48,23 @@ test('falls back to due_at when an old reservation has no confirmation deadline'
     confirmation_due_at: null,
   };
   assert.equal(reservationDeadlineForPhase(reservation, 'confirming'), reservation.due_at);
+});
+
+test('converges reservation state from both absolute deadlines', () => {
+  const reservation = {
+    due_at: '2026-07-26 12:00:00',
+    confirmation_due_at: '2026-07-26 12:05:00',
+  };
+  assert.deepEqual(
+    resolveReservationTimeState(reservation, Date.UTC(2026, 6, 26, 11, 59, 59, 500)),
+    { phase: 'countdown', remainingSeconds: 1 },
+  );
+  assert.deepEqual(
+    resolveReservationTimeState(reservation, Date.UTC(2026, 6, 26, 12, 2, 0)),
+    { phase: 'confirming', remainingSeconds: 180 },
+  );
+  assert.deepEqual(
+    resolveReservationTimeState(reservation, Date.UTC(2026, 6, 26, 12, 6, 0)),
+    { phase: 'expired', remainingSeconds: 0 },
+  );
 });
