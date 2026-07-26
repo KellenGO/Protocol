@@ -5,14 +5,31 @@ export interface ReservationDeadlineSource {
   confirmation_due_at: string | null;
 }
 
+const sqliteUtcTimestampPattern = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z?$/;
+
 export function parseSqliteUtcTimestamp(value: string): number {
   const trimmed = value.trim();
+  const match = sqliteUtcTimestampPattern.exec(trimmed);
+  if (!match) {
+    throw new Error('会话截止时间无效');
+  }
+
   const normalized = trimmed.endsWith('Z')
-    ? trimmed
+    ? trimmed.replace(' ', 'T')
     : `${trimmed.replace(' ', 'T')}Z`;
   const timestamp = Date.parse(normalized);
-  if (!Number.isFinite(timestamp)) {
-    throw new Error('浼氳瘽鎴鏃堕棿鏃犳晥');
+  const parsed = new Date(timestamp);
+  const [, year, month, day, hour, minute, second] = match;
+  if (
+    !Number.isFinite(timestamp)
+    || parsed.getUTCFullYear() !== Number(year)
+    || parsed.getUTCMonth() + 1 !== Number(month)
+    || parsed.getUTCDate() !== Number(day)
+    || parsed.getUTCHours() !== Number(hour)
+    || parsed.getUTCMinutes() !== Number(minute)
+    || parsed.getUTCSeconds() !== Number(second)
+  ) {
+    throw new Error('会话截止时间无效');
   }
   return timestamp;
 }

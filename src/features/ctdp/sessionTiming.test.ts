@@ -22,7 +22,11 @@ test('parses SQLite timestamps as UTC', () => {
 });
 
 test('rejects an invalid deadline instead of treating it as due', () => {
-  assert.throws(() => calculateRemainingSeconds('not-a-time', 0), /浼氳瘽鎴鏃堕棿鏃犳晥/);
+  assert.throws(() => calculateRemainingSeconds('not-a-time', 0), /会话截止时间无效/);
+});
+
+test('rejects a SQLite timestamp with an impossible calendar date', () => {
+  assert.throws(() => parseSqliteUtcTimestamp('2026-02-30 12:00:00'), /会话截止时间无效/);
 });
 
 test('selects the deadline for each reservation phase', () => {
