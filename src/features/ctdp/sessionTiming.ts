@@ -3,7 +3,7 @@ export type ReservationCountdownPhase = 'countdown' | 'confirming';
 export type ReservationTimeState =
   | { phase: 'countdown' | 'confirming'; remainingSeconds: number }
   | { phase: 'expired'; remainingSeconds: 0 }
-  | { phase: 'invalid'; error: string };
+  | { phase: 'timing-error'; error: string };
 
 export interface ReservationDeadlineSource {
   due_at: string;
@@ -74,7 +74,7 @@ export function resolveReservationTimeState(
     return { phase: 'expired', remainingSeconds: 0 };
   } catch (error) {
     return {
-      phase: 'invalid',
+      phase: 'timing-error',
       error: error instanceof Error ? error.message : String(error),
     };
   }

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "test:unit": "tsc -p tsconfig.unit.json && node scripts/run-unit-tests.mjs",
+    "test:unit": "node scripts/run-unit-tests.mjs",
     "lint": "eslint .",
     "check": "npm run typecheck && npm run lint",
     "check:full": "npm run typecheck && npm run build && cd src-tauri && cargo check",

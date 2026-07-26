@@ -22,7 +22,14 @@ import type {
   FailReservationResetResult,
 } from '../types';
 
-type Phase = 'loading' | 'countdown' | 'confirming' | 'ruling' | 'done' | 'empty';
+type Phase =
+  | 'loading'
+  | 'countdown'
+  | 'confirming'
+  | 'timing-error'
+  | 'ruling'
+  | 'done'
+  | 'empty';
 
 type DoneResult =
   | { kind: 'failed_reset'; data: FailReservationResetResult }
@@ -157,8 +164,9 @@ export default function AuxiliarySessionPage() {
     if (deadlineError || remaining !== 0) return;
     if (phase === 'countdown' && reservation) {
       const timeState = resolveReservationTimeState(reservation);
-      if (timeState.phase === 'invalid') {
+      if (timeState.phase === 'timing-error') {
         setError(timeState.error);
+        setPhase('timing-error');
       } else if (timeState.phase === 'confirming') {
         setReservation({ ...reservation, phase: 'confirming' });
         setPhase('confirming');
