@@ -463,10 +463,35 @@ fn stale_cleanup_removes_only_old_task_owned_staging_files() {
     let unrelated = staging_dir.join("keep-me.sqlite");
     std::fs::write(&unrelated, b"keep").unwrap();
 
-    cleanup_stale_staging_files(&staging_dir, SystemTime::now(), Duration::ZERO).unwrap();
+    cleanup_stale_staging_files(&staging_dir, SystemTime::now(), Duration::ZERO, None).unwrap();
 
     assert!(!stale.exists());
     assert!(unrelated.exists());
+}
+
+#[test]
+fn stale_cleanup_preserves_selected_old_task_owned_source() {
+    let test_dir = RestoreTestDir::new("staging-stale-selected-source");
+    let staging_root = test_dir.path().join("staging-root");
+    let staging_dir = staging_root.join(".restore");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+    let backup_path = create_protocol_backup(&test_dir.path().join("source"));
+    let selected_source = staging_dir.join("staging-selected.sqlite");
+    std::fs::rename(&backup_path, &selected_source).unwrap();
+    let old_modified = SystemTime::now() - Duration::from_secs(8 * 24 * 60 * 60);
+    std::fs::File::options()
+        .write(true)
+        .open(&selected_source)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(old_modified))
+        .unwrap();
+    let before = std::fs::read(&selected_source).unwrap();
+
+    let mut staging = prepare_restore_staging(&selected_source, &staging_root).unwrap();
+
+    staging.cleanup().unwrap();
+    assert!(selected_source.is_file());
+    assert_eq!(std::fs::read(&selected_source).unwrap(), before);
 }
 
 #[test]

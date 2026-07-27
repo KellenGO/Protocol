@@ -3033,18 +3033,47 @@ fn unique_database_path(dir: &Path, prefix: &str) -> Result<PathBuf, String> {
     Err("无法生成唯一数据库临时文件名".into())
 }
 
-fn remove_database_files(path: &Path) -> Result<(), String> {
+fn database_file_paths(path: &Path) -> [PathBuf; 4] {
     let sidecar = |suffix: &str| {
         let mut name = path.as_os_str().to_os_string();
         name.push(suffix);
         PathBuf::from(name)
     };
-    let candidates = [
+    [
         path.to_path_buf(),
         sidecar("-wal"),
         sidecar("-shm"),
         sidecar("-journal"),
-    ];
+    ]
+}
+
+fn database_file_identities(path: &Path) -> Result<Vec<PathBuf>, String> {
+    database_file_paths(path)
+        .iter()
+        .map(|candidate| match candidate.canonicalize() {
+            Ok(identity) => Ok(identity),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let parent = candidate
+                    .parent()
+                    .ok_or_else(|| format!("无法定位数据库文件目录: {}", candidate.display()))?;
+                let parent = parent
+                    .canonicalize()
+                    .map_err(|e| format!("无法解析数据库文件目录 {}: {e}", parent.display()))?;
+                let name = candidate
+                    .file_name()
+                    .ok_or_else(|| format!("无法读取数据库文件名: {}", candidate.display()))?;
+                Ok(parent.join(name))
+            }
+            Err(error) => Err(format!(
+                "无法解析数据库文件路径 {}: {error}",
+                candidate.display()
+            )),
+        })
+        .collect()
+}
+
+fn remove_database_files(path: &Path) -> Result<(), String> {
+    let candidates = database_file_paths(path);
     let mut errors = Vec::new();
     for candidate in &candidates {
         match fs::remove_file(candidate) {
@@ -3069,15 +3098,27 @@ fn cleanup_stale_staging_files(
     staging_dir: &Path,
     now: SystemTime,
     minimum_age: Duration,
+    protected_database: Option<&Path>,
 ) -> Result<(), String> {
     if !staging_dir.exists() {
         return Ok(());
     }
+    let protected_identities = protected_database
+        .map(database_file_identities)
+        .transpose()?
+        .unwrap_or_default();
     for entry in fs::read_dir(staging_dir).map_err(|e| format!("无法扫描 staging 目录: {e}"))?
     {
         let entry = entry.map_err(|e| format!("无法读取 staging 条目: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
         if !name.starts_with("staging-") || !name.ends_with(".sqlite") {
+            continue;
+        }
+        let candidate_identities = database_file_identities(&entry.path())?;
+        if candidate_identities
+            .iter()
+            .any(|candidate| protected_identities.contains(candidate))
+        {
             continue;
         }
         let modified = entry
@@ -3154,14 +3195,18 @@ fn prepare_restore_staging_from_source(
 }
 
 fn prepare_restore_staging(backup_path: &Path, app_dir: &Path) -> Result<StagedDatabase, String> {
+    let source_path = backup_path
+        .canonicalize()
+        .map_err(|e| format!("无法解析备份路径 {}: {e}", backup_path.display()))?;
+    let source = open_backup_read_only(&source_path)?;
+    validate_backup_source(&source)?;
     let staging_dir = app_dir.join(".restore");
     cleanup_stale_staging_files(
         &staging_dir,
         SystemTime::now(),
         Duration::from_secs(7 * 24 * 60 * 60),
+        Some(&source_path),
     )?;
-    let source = open_backup_read_only(backup_path)?;
-    validate_backup_source(&source)?;
     prepare_restore_staging_from_source(&source, app_dir)
 }
 
