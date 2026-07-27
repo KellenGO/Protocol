@@ -510,3 +510,348 @@ fn inspect_rejects_truncated_sqlite_database() {
 
     assert!(error.contains("SQLite") || error.contains("完整性"));
 }
+
+fn insert_chain(database: &Database, name: &str) {
+    database
+        .conn
+        .lock()
+        .unwrap()
+        .execute("INSERT INTO chains (name) VALUES (?1)", [name])
+        .unwrap();
+}
+
+fn chain_names(database: &Database) -> Vec<String> {
+    let conn = database.conn.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT name FROM chains ORDER BY id").unwrap();
+    stmt.query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<String>>>()
+        .unwrap()
+}
+
+fn write_restore_backup(database: &Database, path: &Path) {
+    let escaped = path.to_string_lossy().replace('\'', "''");
+    database
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(&format!("VACUUM INTO '{escaped}';"))
+        .unwrap();
+}
+
+#[test]
+fn restore_applies_backup_to_existing_connection_and_keeps_safety_snapshot() {
+    let test_dir = RestoreTestDir::new("restore-live");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+
+    let result = restore_database_inner(&live, &backup_path).unwrap();
+
+    assert_eq!(chain_names(&live), vec!["backup-new"]);
+    let conn = live.conn.lock().unwrap();
+    let journal_mode: String = conn
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .unwrap();
+    let foreign_keys: i64 = conn
+        .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+        .unwrap();
+    drop(conn);
+    assert_eq!(journal_mode.to_lowercase(), "wal");
+    assert_eq!(foreign_keys, 1);
+    assert!(result.safety_path.is_file());
+    let staging_dir = live.db_path.parent().unwrap().join(".restore");
+    assert_eq!(std::fs::read_dir(staging_dir).unwrap().count(), 0);
+    let safety = open_backup_read_only(&result.safety_path).unwrap();
+    let safety_name: String = safety
+        .query_row("SELECT name FROM chains", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(safety_name, "live-old");
+}
+
+#[test]
+fn restore_rejects_live_database_as_its_own_source() {
+    let test_dir = RestoreTestDir::new("restore-self");
+    let live_dir = test_dir.path().join("live");
+    let live = Database::new(live_dir.clone()).unwrap();
+    insert_chain(&live, "live-old");
+
+    let error = restore_database_inner(&live, &live_dir.join("protocol.db")).unwrap_err();
+
+    assert!(error.contains("当前数据库"));
+    assert_eq!(chain_names(&live), vec!["live-old"]);
+}
+
+#[test]
+fn restore_rejects_page_size_mismatch_before_touching_live() {
+    let test_dir = RestoreTestDir::new("restore-page-size");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+    let backup_conn = Connection::open(&backup_path).unwrap();
+    backup_conn
+        .execute_batch(
+            "PRAGMA journal_mode=DELETE;
+             PRAGMA page_size=8192;
+             VACUUM;",
+        )
+        .unwrap();
+    let backup_page_size: i64 = backup_conn
+        .pragma_query_value(None, "page_size", |row| row.get(0))
+        .unwrap();
+    drop(backup_conn);
+    assert_eq!(backup_page_size, 8192);
+
+    let error = restore_database_inner(&live, &backup_path).unwrap_err();
+
+    assert!(error.contains("page size"));
+    assert_eq!(chain_names(&live), vec!["live-old"]);
+}
+
+#[test]
+fn rapid_restores_create_distinct_safety_snapshots() {
+    let test_dir = RestoreTestDir::new("restore-rapid");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+
+    let first = restore_database_inner(&live, &backup_path).unwrap();
+    insert_chain(&live, "between-restores");
+    let second = restore_database_inner(&live, &backup_path).unwrap();
+
+    assert_ne!(first.safety_path, second.safety_path);
+    assert!(first.safety_path.is_file());
+    assert!(second.safety_path.is_file());
+}
+
+#[test]
+fn restore_round_trip_preserves_all_application_tables() {
+    let test_dir = RestoreTestDir::new("restore-all-tables");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    {
+        let conn = backup.conn.lock().unwrap();
+        conn.execute_batch(
+            "
+            INSERT INTO chains (id, name, description)
+            VALUES (1, '晨间链', '保留 Unicode');
+            INSERT INTO focus_sessions (id, chain_id, expected_end_at)
+            VALUES (1, 1, NULL);
+            INSERT INTO reservation_sessions (id, chain_id, due_at)
+            VALUES (1, 1, '2026-07-27 08:00:00');
+            INSERT INTO precedents (id, chain_id, scope, title)
+            VALUES (1, 1, 'main_chain', '离线边界');
+            UPDATE app_settings
+            SET value = '37'
+            WHERE key = 'default_focus_duration';
+            INSERT INTO rsip_goals (id, title)
+            VALUES (1, '更早睡觉');
+            INSERT INTO rsip_failure_paths (id, goal_id, title, nodes_json)
+            VALUES (1, 1, '睡前漂移', '[{\"id\":\"node-1\",\"text\":\"拿起手机\"}]');
+            INSERT INTO rsip_formulas (
+                id, title, goal_id, failure_path_id, intervention_node_id
+            ) VALUES (1, '手机离床', 1, 1, 'node-1');
+            INSERT INTO formula_events (id, formula_id, event_type)
+            VALUES (1, 1, 'created');
+            ",
+        )
+        .unwrap();
+    }
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+
+    restore_database_inner(&live, &backup_path).unwrap();
+
+    let conn = live.conn.lock().unwrap();
+    for table in [
+        "chains",
+        "focus_sessions",
+        "reservation_sessions",
+        "precedents",
+        "app_settings",
+        "rsip_formulas",
+        "formula_events",
+        "rsip_goals",
+        "rsip_failure_paths",
+    ] {
+        let count: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(count > 0, "{table} should survive restore");
+    }
+    let description: String = conn
+        .query_row("SELECT description FROM chains WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let expected_end_at: Option<String> = conn
+        .query_row(
+            "SELECT expected_end_at FROM focus_sessions WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let focus_duration_setting: String = conn
+        .query_row(
+            "SELECT value FROM app_settings
+             WHERE key = 'default_focus_duration'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let formula_relationship: (String, String, String, String) = conn
+        .query_row(
+            "
+            SELECT formula.title, goal.title, path.title, path.nodes_json
+            FROM rsip_formulas AS formula
+            JOIN rsip_goals AS goal ON goal.id = formula.goal_id
+            JOIN rsip_failure_paths AS path
+              ON path.id = formula.failure_path_id
+            WHERE formula.id = 1
+            ",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    let formula_event_id: i64 = conn
+        .query_row(
+            "SELECT formula_id FROM formula_events WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(description, "保留 Unicode");
+    assert_eq!(expected_end_at, None);
+    assert_eq!(focus_duration_setting, "37");
+    assert_eq!(
+        formula_relationship,
+        (
+            "手机离床".into(),
+            "更早睡觉".into(),
+            "睡前漂移".into(),
+            "[{\"id\":\"node-1\",\"text\":\"拿起手机\"}]".into(),
+        )
+    );
+    assert_eq!(formula_event_id, 1);
+}
+
+#[test]
+fn post_restore_validation_failure_rolls_back_safety_snapshot() {
+    let test_dir = RestoreTestDir::new("restore-post-validation");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+
+    let error = restore_database_inner_with_validator(&live, &backup_path, |_| {
+        Err("injected post-copy failure".into())
+    })
+    .unwrap_err();
+
+    assert!(error.contains("injected post-copy failure"));
+    assert!(error.contains("已自动恢复"));
+    assert_eq!(chain_names(&live), vec!["live-old"]);
+}
+
+#[test]
+fn restore_rollback_failure_reports_both_errors_and_preserves_safety_snapshot() {
+    let test_dir = RestoreTestDir::new("restore-rollback-failure");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+
+    let error = restore_database_inner_with_hooks(
+        &live,
+        &backup_path,
+        |_| Err("injected post-copy failure".into()),
+        |_, _| Err("injected rollback failure".into()),
+    )
+    .unwrap_err();
+
+    assert!(error.contains("injected post-copy failure"));
+    assert!(error.contains("injected rollback failure"));
+    let safety_path = error
+        .lines()
+        .find_map(|line| line.strip_prefix("安全快照: "))
+        .map(PathBuf::from)
+        .expect("error should preserve the safety snapshot path");
+    assert!(safety_path.is_file());
+}
+
+#[test]
+fn restore_holds_database_mutex_through_post_copy_validation() {
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    let test_dir = RestoreTestDir::new("restore-mutex");
+    let live = Arc::new(Database::new(test_dir.path().join("live")).unwrap());
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let restore_live = Arc::clone(&live);
+    let restore_thread = std::thread::spawn(move || {
+        restore_database_inner_with_validator(&restore_live, &backup_path, |conn| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            validate_current_schema(conn)
+        })
+    });
+
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (acquired_tx, acquired_rx) = mpsc::channel();
+    let query_live = Arc::clone(&live);
+    let query_thread = std::thread::spawn(move || {
+        let _guard = query_live.conn.lock().unwrap();
+        acquired_tx.send(()).unwrap();
+    });
+
+    assert!(acquired_rx
+        .recv_timeout(Duration::from_millis(100))
+        .is_err());
+    release_tx.send(()).unwrap();
+    restore_thread.join().unwrap().unwrap();
+    acquired_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    query_thread.join().unwrap();
+}

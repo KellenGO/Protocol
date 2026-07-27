@@ -3210,13 +3210,179 @@ fn prepare_restore_staging(backup_path: &Path, app_dir: &Path) -> Result<StagedD
     prepare_restore_staging_from_source(&source, app_dir)
 }
 
-fn validate_backup_file(path: &Path) -> Result<(), String> {
-    if !path.is_file() {
-        return Err("备份文件不存在".into());
+#[derive(Debug)]
+struct RestoreSuccess {
+    safety_path: PathBuf,
+    staging_cleanup_warning: Option<String>,
+}
+
+fn canonical_existing_path(path: &Path, label: &str) -> Result<PathBuf, String> {
+    path.canonicalize()
+        .map_err(|e| format!("无法解析{label}路径 {}: {e}", path.display()))
+}
+
+fn create_safety_snapshot(live: &Connection, database_path: &Path) -> Result<PathBuf, String> {
+    let app_dir = database_path
+        .parent()
+        .ok_or_else(|| "无法定位数据库目录".to_string())?;
+    let safety_dir = app_dir.join(".backup");
+    let safety_path = unique_database_path(&safety_dir, "pre-restore")?;
+
+    let result = (|| {
+        let mut safety =
+            Connection::open(&safety_path).map_err(|e| format!("无法创建恢复前安全快照: {e}"))?;
+        copy_database_snapshot(live, &mut safety)?;
+        safety
+            .execute_batch("PRAGMA journal_mode=DELETE;")
+            .map_err(|e| format!("无法将安全快照转换为自包含模式: {e}"))?;
+        drop(safety);
+        let safety = open_backup_read_only(&safety_path)?;
+        validate_current_schema(&safety)?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => Ok(safety_path),
+        Err(error) => match remove_database_files(&safety_path) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(format!("{error}; 无效安全快照清理也失败: {cleanup_error}")),
+        },
+    }
+}
+
+fn database_page_size(conn: &Connection) -> Result<i64, String> {
+    conn.pragma_query_value(None, "page_size", |row| row.get(0))
+        .map_err(|e| format!("无法读取数据库 page size: {e}"))
+}
+
+fn restore_database_inner(
+    database: &Database,
+    backup_path: &Path,
+) -> Result<RestoreSuccess, String> {
+    restore_database_inner_with_validator(database, backup_path, validate_current_schema)
+}
+
+fn rollback_live_after_failure<R>(
+    live: &mut Connection,
+    safety_path: &Path,
+    restore_error: String,
+    rollback_copier: R,
+) -> Result<RestoreSuccess, String>
+where
+    R: FnOnce(&Connection, &mut Connection) -> Result<(), String>,
+{
+    let rollback_result = (|| {
+        let safety = open_backup_read_only(safety_path)?;
+        rollback_copier(&safety, live)?;
+        validate_current_schema(live)
+    })();
+
+    match rollback_result {
+        Ok(()) => Err(format!(
+            "恢复后校验失败，已自动恢复原数据库: {restore_error}\n安全快照: {}",
+            safety_path.display()
+        )),
+        Err(rollback_error) => Err(format!(
+            "恢复后校验失败且自动回滚失败: {restore_error}; {rollback_error}\n安全快照: {}",
+            safety_path.display()
+        )),
+    }
+}
+
+fn restore_database_inner_with_validator<F>(
+    database: &Database,
+    backup_path: &Path,
+    post_restore_validator: F,
+) -> Result<RestoreSuccess, String>
+where
+    F: FnOnce(&Connection) -> Result<(), String>,
+{
+    restore_database_inner_with_hooks(
+        database,
+        backup_path,
+        post_restore_validator,
+        copy_database_snapshot,
+    )
+}
+
+fn restore_database_inner_with_hooks<F, R>(
+    database: &Database,
+    backup_path: &Path,
+    post_restore_validator: F,
+    rollback_copier: R,
+) -> Result<RestoreSuccess, String>
+where
+    F: FnOnce(&Connection) -> Result<(), String>,
+    R: FnOnce(&Connection, &mut Connection) -> Result<(), String>,
+{
+    let backup_canonical = canonical_existing_path(backup_path, "备份")?;
+    let live_canonical = canonical_existing_path(&database.db_path, "当前数据库")?;
+    if backup_canonical == live_canonical {
+        return Err("不能使用当前数据库自身作为恢复源".into());
     }
 
-    let conn = open_backup_read_only(path)?;
-    validate_backup_source(&conn)
+    let app_dir = database
+        .db_path
+        .parent()
+        .ok_or_else(|| "无法定位数据库目录".to_string())?;
+    let mut staging = prepare_restore_staging(backup_path, app_dir)?;
+    let restore_result = (|| {
+        let mut live = database.conn.lock().map_err(|e| e.to_string())?;
+
+        let staging_page_size = database_page_size(staging.connection())?;
+        let live_page_size = database_page_size(&live)?;
+        if staging_page_size != live_page_size {
+            return Err(format!(
+                "备份 page size {staging_page_size} 与当前数据库 {live_page_size} 不兼容"
+            ));
+        }
+
+        let safety_path = create_safety_snapshot(&live, &database.db_path)?;
+        if let Err(copy_error) = copy_database_snapshot(staging.connection(), &mut live) {
+            return Err(format!(
+                "恢复写入未完成，当前数据库保持原状: {copy_error}\n安全快照: {}",
+                safety_path.display()
+            ));
+        }
+
+        let post_restore_result = post_restore_validator(&live).and_then(|_| {
+            let foreign_keys: i64 = live
+                .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+                .map_err(|e| format!("无法验证 live 外键设置: {e}"))?;
+            if foreign_keys == 1 {
+                Ok(())
+            } else {
+                Err(format!("恢复后外键设置异常: foreign_keys={foreign_keys}"))
+            }
+        });
+
+        if let Err(restore_error) = post_restore_result {
+            return rollback_live_after_failure(
+                &mut live,
+                &safety_path,
+                restore_error,
+                rollback_copier,
+            );
+        }
+
+        Ok(RestoreSuccess {
+            safety_path,
+            staging_cleanup_warning: None,
+        })
+    })();
+
+    let cleanup_result = staging.cleanup();
+    match (restore_result, cleanup_result) {
+        (Ok(success), Ok(())) => Ok(success),
+        (Ok(mut success), Err(cleanup_error)) => {
+            success.staging_cleanup_warning = Some(cleanup_error);
+            Ok(success)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Err(error), Err(cleanup_error)) => {
+            Err(format!("{error}\nstaging 清理也失败: {cleanup_error}"))
+        }
+    }
 }
 
 #[tauri::command]
@@ -3307,42 +3473,17 @@ fn restore_database(
     state: tauri::State<'_, Database>,
     backup_path: String,
 ) -> Result<String, String> {
-    let backup = Path::new(&backup_path);
-    validate_backup_file(backup)?;
-
-    // Safety backup before restore — 使用 VACUUM INTO 确保完整备份
-    let safety_dir = state
-        .db_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(".backup");
-    fs::create_dir_all(&safety_dir).map_err(|e| format!("无法创建安全备份目录: {}", e))?;
-    let timestamp = chrono::Local::now().format("%Y-%m-%d-%H%M");
-    let safety_path = safety_dir.join(format!("pre-restore-{}.sqlite", timestamp));
-    let safety_path_str = safety_path.to_string_lossy().to_string();
-
-    {
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-            .map_err(|e| format!("安全备份失败(WAL checkpoint): {}", e))?;
-        let escaped = safety_path_str.replace('\'', "''");
-        conn.execute_batch(&format!("VACUUM INTO '{}';", escaped))
-            .map_err(|e| format!("无法创建恢复前安全备份: {}", e))?;
+    let result = restore_database_inner(&state, Path::new(&backup_path))?;
+    let mut message = format!(
+        "恢复成功，数据已立即生效。\n恢复前安全快照: {}",
+        result.safety_path.display()
+    );
+    if let Some(cleanup_warning) = result.staging_cleanup_warning {
+        message.push_str(&format!(
+            "\n恢复已成功，但 staging 清理失败: {cleanup_warning}"
+        ));
     }
-
-    // Release the database connection lock before replacing the file
-    {
-        let _guard = state.conn.lock().map_err(|e| e.to_string())?;
-        // guard dropped immediately
-    }
-
-    // Replace database file
-    fs::copy(backup, &state.db_path).map_err(|e| format!("恢复失败: {}", e))?;
-
-    Ok(format!(
-        "恢复成功，请重启 Protocol 以加载新数据。\n恢复前安全备份: {}",
-        safety_path.display()
-    ))
+    Ok(message)
 }
 
 #[tauri::command]
