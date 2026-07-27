@@ -123,8 +123,15 @@ export default function DataManagement() {
     setBusy(true);
     try {
       const result = await restoreDatabase(backupInfo.path);
-      setSuccess(result);
       setBackupInfo(null);
+      setSuccess(result);
+      try {
+        const info = await getDatabaseInfo();
+        setDbInfo(info);
+      } catch (refreshErr) {
+        setDbInfo(null);
+        setError(`恢复已成功，但统计刷新失败: ${String(refreshErr)}`);
+      }
     } catch (err) {
       setError(String(err));
     } finally {
@@ -254,9 +261,9 @@ export default function DataManagement() {
         </div>
       </div>
 
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
       {success && (
-        <p className="dm-success">
+        <p className="dm-success" role="status" aria-live="polite">
           {success}
         </p>
       )}
@@ -317,15 +324,15 @@ export default function DataManagement() {
       <section className="dm-section">
         <h3>从备份恢复</h3>
         <p className="dm-desc">
-          选择一个 Protocol 备份文件（.sqlite）来替换当前数据。
-          恢复前会自动创建当前数据的安全备份，存放在数据库目录的 <code>.backup/</code> 子目录下。
+          恢复会替换当前所有本地数据，包括链进度、设置，以及备份中仍在进行或已经逾期的会话。恢复前会自动创建并验证当前数据库的安全快照；恢复成功后立即生效，无需重启 Protocol。
+          请选择由 Protocol“备份当前数据”生成的自包含 SQLite 文件；正在使用的 protocol.db 或 WAL sidecar 组合不会被当作备份恢复。
         </p>
         <p className="dm-warn">
           恢复会替换当前所有本地数据。请确认已备份当前数据库。
         </p>
 
         {restoreError && (
-          <p className="form-error">{restoreError}</p>
+          <p className="form-error" role="alert">{restoreError}</p>
         )}
 
         {/* Backup file info — after inspection */}
@@ -355,7 +362,7 @@ export default function DataManagement() {
               {renderTableCount('定式事件', backupInfo.tables.formula_events)}
             </div>
             <p className="dm-confirm-warn">
-              此操作不可撤销！当前数据将被完全替换。恢复后请重启 Protocol 以加载新数据。
+              当前数据将被完整替换。确认后应用会立即切换到备份数据。
             </p>
             <div className="dm-confirm-actions">
               <button className="btn btn-secondary" onClick={handleRestoreCancel} disabled={busy}>
