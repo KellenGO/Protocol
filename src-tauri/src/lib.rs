@@ -2,12 +2,14 @@ mod db;
 
 use db::{initialize_schema_on, Database, CURRENT_DB_VERSION};
 use rusqlite::backup::{Backup, StepResult};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{ffi, Connection, OpenFlags};
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::Read;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex as StdMutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
@@ -29,6 +31,154 @@ const CURRENT_SCHEMA_PROBES: &[(&str, &str)] = &[
 ];
 
 static RESTORE_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+static ACTIVE_RESTORE_PREVIEWS: OnceLock<StdMutex<HashMap<PathBuf, RegisteredRestorePreview>>> =
+    OnceLock::new();
+const RESTORE_DIRECTORY_NAME: &str = ".restore";
+const RESTORE_PREVIEW_PREFIX: &str = "restore-preview";
+const RESTORE_STAGING_PREFIX: &str = "staging";
+const RESTORE_STALE_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FileIdentity {
+    volume: u64,
+    file: u64,
+}
+
+struct RegisteredRestorePreview {
+    identity: FileIdentity,
+    source: Option<Connection>,
+}
+
+fn restore_preview_registry(
+) -> Result<MutexGuard<'static, HashMap<PathBuf, RegisteredRestorePreview>>, String> {
+    ACTIVE_RESTORE_PREVIEWS
+        .get_or_init(|| StdMutex::new(HashMap::new()))
+        .lock()
+        .map_err(|e| format!("恢复预览注册表不可用: {e}"))
+}
+
+fn register_restore_preview(path: &Path, source: Connection) -> Result<(), String> {
+    let file = File::open(path).map_err(|e| format!("无法打开任务恢复预览: {e}"))?;
+    let identity = file_identity(&file).map_err(|e| format!("无法读取任务恢复预览身份: {e}"))?;
+    restore_preview_registry()?.insert(
+        path.to_path_buf(),
+        RegisteredRestorePreview {
+            identity,
+            source: Some(source),
+        },
+    );
+    Ok(())
+}
+
+fn remove_registered_restore_preview(path: &Path) -> Result<(), String> {
+    let preview = restore_preview_registry()?
+        .remove(path)
+        .ok_or_else(|| "恢复预览不属于当前检查任务".to_string())?;
+    let identity = preview.identity;
+    drop(preview.source);
+    let result = remove_preview_files_with_identity(path, identity);
+    if result.is_err() {
+        restore_preview_registry()?.insert(
+            path.to_path_buf(),
+            RegisteredRestorePreview {
+                identity,
+                source: None,
+            },
+        );
+    }
+    result
+}
+
+fn registered_restore_preview_identity(path: &Path) -> Result<Option<FileIdentity>, String> {
+    Ok(restore_preview_registry()?
+        .get(path)
+        .map(|preview| preview.identity))
+}
+
+#[cfg(unix)]
+fn file_identity(file: &File) -> std::io::Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = file.metadata()?;
+    Ok(FileIdentity {
+        volume: metadata.dev(),
+        file: metadata.ino(),
+    })
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct WindowsFileTime {
+    dwLowDateTime: u32,
+    dwHighDateTime: u32,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct WindowsByHandleFileInformation {
+    dwFileAttributes: u32,
+    ftCreationTime: WindowsFileTime,
+    ftLastAccessTime: WindowsFileTime,
+    ftLastWriteTime: WindowsFileTime,
+    dwVolumeSerialNumber: u32,
+    nFileSizeHigh: u32,
+    nFileSizeLow: u32,
+    nNumberOfLinks: u32,
+    nFileIndexHigh: u32,
+    nFileIndexLow: u32,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetFileInformationByHandle(
+        file: *mut std::ffi::c_void,
+        information: *mut WindowsByHandleFileInformation,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+fn windows_handle_identity(handle: *mut std::ffi::c_void) -> std::io::Result<FileIdentity> {
+    use std::mem::MaybeUninit;
+
+    let mut information = MaybeUninit::<WindowsByHandleFileInformation>::uninit();
+    // SAFETY: `handle` is a live owned handle and `information` points to enough
+    // writable memory for BY_HANDLE_FILE_INFORMATION.
+    let success = unsafe { GetFileInformationByHandle(handle, information.as_mut_ptr()) };
+    if success == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a successful GetFileInformationByHandle call initialized every
+    // field in the output structure.
+    let information = unsafe { information.assume_init() };
+    Ok(FileIdentity {
+        volume: u64::from(information.dwVolumeSerialNumber),
+        file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
+    })
+}
+
+#[cfg(windows)]
+fn file_identity(file: &File) -> std::io::Result<FileIdentity> {
+    use std::os::windows::io::AsRawHandle;
+
+    windows_handle_identity(file.as_raw_handle().cast())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_identity(file: &File) -> std::io::Result<FileIdentity> {
+    let metadata = file.metadata()?;
+    let modified = metadata
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    Ok(FileIdentity {
+        volume: metadata.len(),
+        file: modified,
+    })
+}
 
 fn clean_option(value: Option<String>) -> String {
     value.unwrap_or_default().trim().to_string()
@@ -2877,34 +3027,194 @@ fn database_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-fn validate_backup_sidecar_state(path: &Path) -> Result<(), String> {
+fn validate_backup_header(file: &File) -> Result<(), String> {
+    let mut reader = file
+        .try_clone()
+        .map_err(|e| format!("无法绑定备份文件句柄: {e}"))?;
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|e| format!("无法定位备份文件头: {e}"))?;
     let mut header = [0_u8; 20];
-    fs::File::open(path)
-        .map_err(|e| format!("无法读取备份文件头: {e}"))?
+    reader
         .read_exact(&mut header)
         .map_err(|e| format!("备份文件头不完整: {e}"))?;
     if &header[..16] != b"SQLite format 3\0" {
         return Err("选择的文件不是有效的 SQLite 数据库".into());
     }
 
-    let wal_mode = header[18] == 2 || header[19] == 2;
-    let wal_path = database_sidecar_path(path, "-wal");
-    let shm_path = database_sidecar_path(path, "-shm");
-    if wal_mode || wal_path.exists() || shm_path.exists() {
-        return Err(
-            "选择的是活动 WAL 数据库，不是自包含的 Protocol 备份；请先使用应用内 SQLite 备份"
-                .into(),
-        );
+    if header[18] == 2 || header[19] == 2 {
+        return Err("选择的是 WAL 模式数据库，不是自包含的 Protocol 备份".into());
     }
     Ok(())
 }
 
-fn open_backup_read_only(path: &Path) -> Result<Connection, String> {
-    validate_backup_sidecar_state(path)?;
+fn validate_backup_sidecar_state(path: &Path) -> Result<(), String> {
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = database_sidecar_path(path, suffix);
+        match fs::symlink_metadata(&sidecar) {
+            Ok(_) => {
+                return Err(format!(
+                    "选择的数据库存在 {suffix} sidecar，不是自包含的 Protocol 备份"
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "无法确认备份 sidecar 状态 {}: {error}",
+                    sidecar.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+struct BoundBackupSource {
+    path: PathBuf,
+    identity: FileIdentity,
+    identity_handle: File,
+    connection: Connection,
+}
+
+#[cfg(windows)]
+fn verify_sqlite_connection_identity(
+    connection: &Connection,
+    expected: FileIdentity,
+) -> Result<(), String> {
+    let mut handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    // SAFETY: the SQLite connection is live and the Win32 VFS writes one
+    // native HANDLE value to `handle`.
+    let result = unsafe {
+        ffi::sqlite3_file_control(
+            connection.handle(),
+            c"main".as_ptr(),
+            ffi::SQLITE_FCNTL_WIN32_GET_HANDLE,
+            (&mut handle as *mut *mut std::ffi::c_void).cast(),
+        )
+    };
+    if result != ffi::SQLITE_OK || handle.is_null() {
+        return Err(format!(
+            "无法读取 SQLite 已打开源文件身份: error code {result}"
+        ));
+    }
+    let actual =
+        windows_handle_identity(handle).map_err(|e| format!("无法核对 SQLite 源文件句柄: {e}"))?;
+    if actual != expected {
+        return Err("SQLite 已打开的文件与绑定备份源身份不一致".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn verify_sqlite_connection_identity(
+    connection: &Connection,
+    _expected: FileIdentity,
+) -> Result<(), String> {
+    let mut moved = 0_i32;
+    // SAFETY: the connection is alive for this call, "main" is a
+    // NUL-terminated database name, and SQLite writes one i32 to `moved`.
+    let result = unsafe {
+        ffi::sqlite3_file_control(
+            connection.handle(),
+            c"main".as_ptr(),
+            ffi::SQLITE_FCNTL_HAS_MOVED,
+            (&mut moved as *mut i32).cast(),
+        )
+    };
+    if result != ffi::SQLITE_OK {
+        return Err(format!(
+            "无法核对 SQLite 已打开源文件身份: error code {result}"
+        ));
+    }
+    if moved != 0 {
+        return Err("SQLite 已打开的备份源在检查期间已被替换或移动".into());
+    }
+    Ok(())
+}
+
+impl BoundBackupSource {
+    fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
+    fn verify_unchanged_and_self_contained(&self) -> Result<(), String> {
+        verify_sqlite_connection_identity(&self.connection, self.identity)?;
+
+        let current = File::open(&self.path)
+            .map_err(|e| format!("备份源在检查期间不可访问或已被替换: {e}"))?;
+        let current_identity =
+            file_identity(&current).map_err(|e| format!("无法读取当前备份源身份: {e}"))?;
+        if current_identity != self.identity {
+            return Err("备份源在检查期间已被替换，已取消恢复预览".into());
+        }
+        let bound_identity = file_identity(&self.identity_handle)
+            .map_err(|e| format!("无法复核已绑定备份源身份: {e}"))?;
+        if bound_identity != self.identity {
+            return Err("已绑定备份源身份在检查期间发生变化".into());
+        }
+        validate_backup_header(&self.identity_handle)?;
+        validate_backup_sidecar_state(&self.path)
+    }
+
+    fn into_connection(self) -> Connection {
+        self.connection
+    }
+}
+
+fn bind_backup_source_impl<F, P>(
+    path: &Path,
+    after_identity_bound: F,
+    after_snapshot_pinned: P,
+) -> Result<BoundBackupSource, String>
+where
+    F: FnOnce(&Path),
+    P: FnOnce(&Path),
+{
+    let path = path
+        .canonicalize()
+        .map_err(|e| format!("无法解析备份路径 {}: {e}", path.display()))?;
+    let identity_handle = File::open(&path).map_err(|e| format!("无法只读绑定备份文件: {e}"))?;
+    let metadata = identity_handle
+        .metadata()
+        .map_err(|e| format!("无法读取备份文件信息: {e}"))?;
+    if !metadata.is_file() {
+        return Err("备份路径不是普通文件".into());
+    }
+    let identity =
+        file_identity(&identity_handle).map_err(|e| format!("无法读取备份文件身份: {e}"))?;
+    validate_backup_header(&identity_handle)?;
+    validate_backup_sidecar_state(&path)?;
+    after_identity_bound(&path);
+
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
         | OpenFlags::SQLITE_OPEN_NO_MUTEX
         | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    Connection::open_with_flags(path, flags).map_err(|e| format!("无法只读打开 SQLite 备份: {e}"))
+    let connection = Connection::open_with_flags(&path, flags)
+        .map_err(|e| format!("无法只读打开 SQLite 备份: {e}"))?;
+    connection
+        .execute_batch("BEGIN DEFERRED TRANSACTION;")
+        .map_err(|e| format!("无法固定备份读取事务: {e}"))?;
+    connection
+        .pragma_query_value(None, "schema_version", |row| row.get::<_, i64>(0))
+        .map_err(|e| format!("无法固定备份读取快照: {e}"))?;
+    after_snapshot_pinned(&path);
+
+    Ok(BoundBackupSource {
+        path,
+        identity,
+        identity_handle,
+        connection,
+    })
+}
+
+fn bind_backup_source(path: &Path) -> Result<BoundBackupSource, String> {
+    bind_backup_source_impl(path, |_| {}, |_| {})
+}
+
+fn open_backup_read_only(path: &Path) -> Result<Connection, String> {
+    let source = bind_backup_source(path)?;
+    source.verify_unchanged_and_self_contained()?;
+    Ok(source.into_connection())
 }
 
 fn check_database_integrity(conn: &Connection) -> Result<(), String> {
@@ -3034,17 +3344,43 @@ fn unique_database_path(dir: &Path, prefix: &str) -> Result<PathBuf, String> {
 }
 
 fn database_file_paths(path: &Path) -> [PathBuf; 4] {
-    let sidecar = |suffix: &str| {
-        let mut name = path.as_os_str().to_os_string();
-        name.push(suffix);
-        PathBuf::from(name)
-    };
     [
         path.to_path_buf(),
-        sidecar("-wal"),
-        sidecar("-shm"),
-        sidecar("-journal"),
+        database_sidecar_path(path, "-wal"),
+        database_sidecar_path(path, "-shm"),
+        database_sidecar_path(path, "-journal"),
     ]
+}
+
+fn is_exact_task_owned_database_name(name: &str, prefix: &str) -> bool {
+    let Some(identity) = name
+        .strip_prefix(prefix)
+        .and_then(|value| value.strip_prefix('-'))
+        .and_then(|value| value.strip_suffix(".sqlite"))
+    else {
+        return false;
+    };
+    let mut parts = identity.split('-');
+    matches!(
+        (
+            parts.next().and_then(|value| value.parse::<u128>().ok()),
+            parts.next().and_then(|value| value.parse::<u32>().ok()),
+            parts.next().and_then(|value| value.parse::<u64>().ok()),
+            parts.next(),
+        ),
+        (Some(_), Some(_), Some(_), None)
+    )
+}
+
+fn task_owned_database_base_name(name: &str) -> Option<&str> {
+    let base = ["-wal", "-shm", "-journal"]
+        .iter()
+        .find_map(|suffix| name.strip_suffix(suffix))
+        .unwrap_or(name);
+    [RESTORE_STAGING_PREFIX, RESTORE_PREVIEW_PREFIX]
+        .iter()
+        .any(|prefix| is_exact_task_owned_database_name(base, prefix))
+        .then_some(base)
 }
 
 fn database_file_identities(path: &Path) -> Result<Vec<PathBuf>, String> {
@@ -3083,8 +3419,10 @@ fn remove_database_files(path: &Path) -> Result<(), String> {
         }
     }
     for candidate in &candidates {
-        if candidate.exists() {
-            errors.push(format!("清理后文件仍存在: {}", candidate.display()));
+        match fs::symlink_metadata(candidate) {
+            Ok(_) => errors.push(format!("清理后文件仍存在: {}", candidate.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => errors.push(format!("无法确认清理结果 {}: {error}", candidate.display())),
         }
     }
     if errors.is_empty() {
@@ -3094,39 +3432,80 @@ fn remove_database_files(path: &Path) -> Result<(), String> {
     }
 }
 
+fn cleanup_database_on_error<T>(
+    result: Result<T, String>,
+    path: &Path,
+    label: &str,
+) -> Result<T, String> {
+    result.or_else(|error| match remove_database_files(path) {
+        Ok(()) => Err(error),
+        Err(cleanup_error) => Err(format!("{error}; {label}清理也失败: {cleanup_error}")),
+    })
+}
+
 fn cleanup_stale_staging_files(
     staging_dir: &Path,
     now: SystemTime,
     minimum_age: Duration,
     protected_database: Option<&Path>,
 ) -> Result<(), String> {
-    if !staging_dir.exists() {
-        return Ok(());
+    match fs::symlink_metadata(staging_dir) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err("restore 工作路径不是目录".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("无法读取 restore 工作目录: {error}")),
     }
     let protected_identities = protected_database
         .map(database_file_identities)
         .transpose()?
         .unwrap_or_default();
+    let mut task_owned_bases = HashSet::new();
     for entry in fs::read_dir(staging_dir).map_err(|e| format!("无法扫描 staging 目录: {e}"))?
     {
         let entry = entry.map_err(|e| format!("无法读取 staging 条目: {e}"))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if !name.starts_with("staging-") || !name.ends_with(".sqlite") {
+        let Some(base_name) = task_owned_database_base_name(&name) else {
+            continue;
+        };
+        task_owned_bases.insert(staging_dir.join(base_name));
+    }
+
+    for base_path in task_owned_bases {
+        if registered_restore_preview_identity(&base_path)?.is_some() {
             continue;
         }
-        let candidate_identities = database_file_identities(&entry.path())?;
+        let candidate_identities = database_file_identities(&base_path)?;
         if candidate_identities
             .iter()
             .any(|candidate| protected_identities.contains(candidate))
         {
             continue;
         }
-        let modified = entry
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .map_err(|e| format!("无法读取 staging 修改时间: {e}"))?;
-        if now.duration_since(modified).unwrap_or_default() >= minimum_age {
-            remove_database_files(&entry.path())?;
+
+        let mut newest_modified: Option<SystemTime> = None;
+        for candidate in database_file_paths(&base_path) {
+            match fs::symlink_metadata(&candidate) {
+                Ok(metadata) => {
+                    let modified = metadata.modified().map_err(|e| {
+                        format!("无法读取 restore 文件修改时间 {}: {e}", candidate.display())
+                    })?;
+                    newest_modified =
+                        Some(newest_modified.map_or(modified, |current| current.max(modified)));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "无法读取 restore 文件状态 {}: {error}",
+                        candidate.display()
+                    ));
+                }
+            }
+        }
+        let Some(newest_modified) = newest_modified else {
+            continue;
+        };
+        if now.duration_since(newest_modified).unwrap_or_default() >= minimum_age {
+            remove_database_files(&base_path)?;
         }
     }
     Ok(())
@@ -3159,8 +3538,8 @@ fn prepare_restore_staging_from_source(
     source: &Connection,
     app_dir: &Path,
 ) -> Result<StagedDatabase, String> {
-    let staging_dir = app_dir.join(".restore");
-    let staging_path = unique_database_path(&staging_dir, "staging")?;
+    let staging_dir = canonical_restore_directory_from_app_dir(app_dir)?;
+    let staging_path = unique_database_path(&staging_dir, RESTORE_STAGING_PREFIX)?;
     let result = (|| {
         let mut staging = Connection::open(&staging_path)
             .map_err(|e| format!("无法打开恢复 staging 数据库: {e}"))?;
@@ -3182,43 +3561,223 @@ fn prepare_restore_staging_from_source(
         Ok(staging)
     })();
 
-    match result {
-        Ok(connection) => Ok(StagedDatabase {
-            path: staging_path,
-            connection: Some(connection),
-        }),
-        Err(error) => match remove_database_files(&staging_path) {
-            Ok(()) => Err(error),
-            Err(cleanup_error) => Err(format!("{error}; staging 清理也失败: {cleanup_error}")),
-        },
-    }
+    cleanup_database_on_error(result, &staging_path, "staging").map(|connection| StagedDatabase {
+        path: staging_path,
+        connection: Some(connection),
+    })
 }
 
+#[cfg(test)]
 fn prepare_restore_staging(backup_path: &Path, app_dir: &Path) -> Result<StagedDatabase, String> {
-    let source_path = backup_path
-        .canonicalize()
-        .map_err(|e| format!("无法解析备份路径 {}: {e}", backup_path.display()))?;
-    let source = open_backup_read_only(&source_path)?;
-    validate_backup_source(&source)?;
-    let staging_dir = app_dir.join(".restore");
+    let source = bind_backup_source(backup_path)?;
+    validate_backup_source(source.connection())?;
+    let staging_dir = canonical_restore_directory_from_app_dir(app_dir)?;
     cleanup_stale_staging_files(
         &staging_dir,
         SystemTime::now(),
-        Duration::from_secs(7 * 24 * 60 * 60),
-        Some(&source_path),
+        RESTORE_STALE_AGE,
+        Some(&source.path),
     )?;
-    prepare_restore_staging_from_source(&source, app_dir)
+    source.verify_unchanged_and_self_contained()?;
+    prepare_restore_staging_from_source(source.connection(), app_dir)
+}
+
+fn canonical_restore_directory_from_app_dir(app_dir: &Path) -> Result<PathBuf, String> {
+    fs::create_dir_all(app_dir).map_err(|e| format!("无法创建应用数据库目录: {e}"))?;
+    let app_dir = app_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析应用数据库目录: {e}"))?;
+    let restore_dir = app_dir.join(RESTORE_DIRECTORY_NAME);
+    fs::create_dir_all(&restore_dir).map_err(|e| format!("无法创建 restore 工作目录: {e}"))?;
+    restore_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析 restore 工作目录: {e}"))
+}
+
+fn canonical_restore_directory(database: &Database) -> Result<PathBuf, String> {
+    let app_dir = database
+        .db_path
+        .parent()
+        .ok_or_else(|| "无法定位数据库目录".to_string())?;
+    canonical_restore_directory_from_app_dir(app_dir)
+}
+
+fn restore_preview_file_identity(path: &Path) -> Result<Option<FileIdentity>, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err("恢复预览不能是符号链接".into()),
+        Ok(metadata) if !metadata.is_file() => Err("恢复预览不是普通文件".into()),
+        Ok(_) => {
+            let file =
+                File::open(path).map_err(|e| format!("无法打开当前恢复预览以核对身份: {e}"))?;
+            file_identity(&file)
+                .map(Some)
+                .map_err(|e| format!("无法读取当前恢复预览身份: {e}"))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("无法读取恢复预览状态: {error}")),
+    }
+}
+
+fn remove_preview_files_with_identity(path: &Path, expected: FileIdentity) -> Result<(), String> {
+    if restore_preview_file_identity(path)?.is_some_and(|current| current != expected) {
+        return Err("恢复预览文件身份已被替换，未删除当前路径".into());
+    }
+    remove_database_files(path)
+}
+
+fn task_owned_preview_path(
+    database: &Database,
+    candidate: &Path,
+    require_main_file: bool,
+) -> Result<PathBuf, String> {
+    let restore_dir = canonical_restore_directory(database)?;
+    let file_name = candidate
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "恢复预览缺少有效文件名".to_string())?;
+    if !is_exact_task_owned_database_name(file_name, RESTORE_PREVIEW_PREFIX) {
+        return Err("恢复预览身份无效".into());
+    }
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| "恢复预览缺少父目录".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("无法解析恢复预览目录: {e}"))?;
+    if parent != restore_dir {
+        return Err("恢复预览不属于应用的 .restore 工作目录".into());
+    }
+
+    let normalized = restore_dir.join(file_name);
+    let mut registry = restore_preview_registry()?;
+    let registered_identity = registry
+        .get(&normalized)
+        .map(|preview| preview.identity)
+        .ok_or_else(|| "恢复预览不属于当前检查任务".to_string())?;
+    let current_identity = match restore_preview_file_identity(&normalized) {
+        Ok(identity) => identity,
+        Err(error) => {
+            registry.remove(&normalized);
+            return Err(error);
+        }
+    };
+    if current_identity.is_none() && require_main_file {
+        registry.remove(&normalized);
+        return Err("恢复预览不存在或已被使用".into());
+    }
+    if current_identity.is_some_and(|identity| identity != registered_identity) {
+        registry.remove(&normalized);
+        return Err("恢复预览文件身份已被替换".into());
+    }
+    Ok(normalized)
+}
+
+fn discard_restore_preview_inner(database: &Database, preview_path: &Path) -> Result<(), String> {
+    let preview_path = task_owned_preview_path(database, preview_path, false)?;
+    remove_registered_restore_preview(&preview_path)
+}
+
+fn backup_file_info(
+    source_path: &Path,
+    preview_path: &Path,
+    conn: &Connection,
+) -> Result<serde_json::Value, String> {
+    let file_size_bytes = fs::metadata(preview_path)
+        .map_err(|e| format!("无法读取恢复预览文件信息: {e}"))?
+        .len();
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|e| format!("无法读取数据库版本: {e}"))?;
+    let total_user_tables: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("无法统计数据库数据表: {e}"))?;
+
+    let mut table_info = serde_json::Map::new();
+    for table in REQUIRED_TABLES.iter().chain(RSIP_TABLES.iter()) {
+        if table_exists(conn, table)? {
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|e| format!("无法统计数据表 {table}: {e}"))?;
+            table_info.insert(table.to_string(), serde_json::json!(count));
+        } else {
+            table_info.insert(
+                table.to_string(),
+                serde_json::Value::String("(表不存在)".into()),
+            );
+        }
+    }
+
+    Ok(serde_json::json!({
+        "source_path": source_path.to_string_lossy(),
+        "restore_preview_path": preview_path.to_string_lossy(),
+        "file_size_bytes": file_size_bytes,
+        "version": version,
+        "tables": table_info,
+        "total_user_tables": total_user_tables,
+    }))
+}
+
+fn inspect_backup_file_inner_impl<F, P>(
+    database: &Database,
+    backup_path: &Path,
+    after_identity_bound: F,
+    after_snapshot_pinned: P,
+) -> Result<serde_json::Value, String>
+where
+    F: FnOnce(&Path),
+    P: FnOnce(&Path),
+{
+    let restore_dir = canonical_restore_directory(database)?;
+    let source = bind_backup_source_impl(backup_path, after_identity_bound, after_snapshot_pinned)?;
+    cleanup_stale_staging_files(
+        &restore_dir,
+        SystemTime::now(),
+        RESTORE_STALE_AGE,
+        Some(&source.path),
+    )?;
+
+    validate_backup_source(source.connection())?;
+    let preview_path = unique_database_path(&restore_dir, RESTORE_PREVIEW_PREFIX)?;
+    let preview_result = (|| {
+        let mut preview =
+            Connection::open(&preview_path).map_err(|e| format!("无法创建不可变恢复预览: {e}"))?;
+        source.verify_unchanged_and_self_contained()?;
+        copy_database_snapshot(source.connection(), &mut preview)?;
+        preview
+            .execute_batch("PRAGMA journal_mode=DELETE;")
+            .map_err(|e| format!("无法将恢复预览转换为自包含模式: {e}"))?;
+        drop(preview);
+
+        let preview = open_backup_read_only(&preview_path)?;
+        validate_backup_source(&preview)?;
+        let info = backup_file_info(backup_path, &preview_path, &preview)?;
+        Ok((info, preview))
+    })();
+
+    let (info, preview) = cleanup_database_on_error(preview_result, &preview_path, "恢复预览")?;
+    cleanup_database_on_error(
+        register_restore_preview(&preview_path, preview).map(|_| info),
+        &preview_path,
+        "恢复预览",
+    )
+}
+
+fn inspect_backup_file_inner(
+    database: &Database,
+    backup_path: &Path,
+) -> Result<serde_json::Value, String> {
+    inspect_backup_file_inner_impl(database, backup_path, |_| {}, |_| {})
 }
 
 #[derive(Debug)]
 struct RestoreSuccess {
     safety_path: PathBuf,
-    staging_cleanup_warning: Option<String>,
-}
-
-fn canonical_existing_path(path: &Path, label: &str) -> Result<PathBuf, String> {
-    path.canonicalize()
-        .map_err(|e| format!("无法解析{label}路径 {}: {e}", path.display()))
+    cleanup_warning: Option<String>,
 }
 
 fn create_safety_snapshot(live: &Connection, database_path: &Path) -> Result<PathBuf, String> {
@@ -3241,13 +3800,7 @@ fn create_safety_snapshot(live: &Connection, database_path: &Path) -> Result<Pat
         Ok(())
     })();
 
-    match result {
-        Ok(()) => Ok(safety_path),
-        Err(error) => match remove_database_files(&safety_path) {
-            Ok(()) => Err(error),
-            Err(cleanup_error) => Err(format!("{error}; 无效安全快照清理也失败: {cleanup_error}")),
-        },
-    }
+    cleanup_database_on_error(result, &safety_path, "无效安全快照").map(|_| safety_path)
 }
 
 fn database_page_size(conn: &Connection) -> Result<i64, String> {
@@ -3257,9 +3810,15 @@ fn database_page_size(conn: &Connection) -> Result<i64, String> {
 
 fn restore_database_inner(
     database: &Database,
-    backup_path: &Path,
+    preview_path: &Path,
 ) -> Result<RestoreSuccess, String> {
-    restore_database_inner_with_validator(database, backup_path, validate_current_schema)
+    restore_database_inner_impl(
+        database,
+        preview_path,
+        validate_current_schema,
+        copy_database_snapshot,
+        copy_database_snapshot,
+    )
 }
 
 fn rollback_live_after_failure<R>(
@@ -3289,43 +3848,87 @@ where
     }
 }
 
-fn restore_database_inner_with_validator<F>(
+fn restore_database_inner_impl<F, L, R>(
     database: &Database,
-    backup_path: &Path,
+    preview_path: &Path,
     post_restore_validator: F,
-) -> Result<RestoreSuccess, String>
-where
-    F: FnOnce(&Connection) -> Result<(), String>,
-{
-    restore_database_inner_with_hooks(
-        database,
-        backup_path,
-        post_restore_validator,
-        copy_database_snapshot,
-    )
-}
-
-fn restore_database_inner_with_hooks<F, R>(
-    database: &Database,
-    backup_path: &Path,
-    post_restore_validator: F,
+    live_copier: L,
     rollback_copier: R,
 ) -> Result<RestoreSuccess, String>
 where
     F: FnOnce(&Connection) -> Result<(), String>,
+    L: FnOnce(&Connection, &mut Connection) -> Result<(), String>,
     R: FnOnce(&Connection, &mut Connection) -> Result<(), String>,
 {
-    let backup_canonical = canonical_existing_path(backup_path, "备份")?;
-    let live_canonical = canonical_existing_path(&database.db_path, "当前数据库")?;
-    if backup_canonical == live_canonical {
-        return Err("不能使用当前数据库自身作为恢复源".into());
+    let preview_path = task_owned_preview_path(database, preview_path, true)?;
+    let restore_dir = canonical_restore_directory(database)?;
+    let stale_cleanup = cleanup_stale_staging_files(
+        &restore_dir,
+        SystemTime::now(),
+        RESTORE_STALE_AGE,
+        Some(&preview_path),
+    );
+    let mut registered = restore_preview_registry()?
+        .remove(&preview_path)
+        .ok_or_else(|| "恢复预览不属于当前检查任务".to_string())?;
+    let identity = registered.identity;
+    let source = match registered.source.take() {
+        Some(source) => source,
+        None => {
+            return match remove_preview_files_with_identity(&preview_path, identity) {
+                Ok(()) => Err("恢复预览已不可用于恢复，并已完成清理".into()),
+                Err(cleanup_error) => Err(format!(
+                    "恢复预览已不可用于恢复，清理也失败: {cleanup_error}"
+                )),
+            };
+        }
+    };
+    let restore_result = stale_cleanup.and_then(|_| {
+        restore_database_from_preview(
+            database,
+            &source,
+            post_restore_validator,
+            live_copier,
+            rollback_copier,
+        )
+    });
+    drop(source);
+    let preview_cleanup = remove_preview_files_with_identity(&preview_path, identity);
+    match (restore_result, preview_cleanup) {
+        (Ok(success), Ok(())) => Ok(success),
+        (Ok(mut success), Err(cleanup_error)) => {
+            let warning = format!("恢复预览清理失败: {cleanup_error}");
+            success.cleanup_warning = Some(match success.cleanup_warning {
+                Some(existing) => format!("{existing}; {warning}"),
+                None => warning,
+            });
+            Ok(success)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Err(error), Err(cleanup_error)) => {
+            Err(format!("{error}\n恢复预览清理也失败: {cleanup_error}"))
+        }
     }
+}
 
+fn restore_database_from_preview<F, L, R>(
+    database: &Database,
+    preview: &Connection,
+    post_restore_validator: F,
+    live_copier: L,
+    rollback_copier: R,
+) -> Result<RestoreSuccess, String>
+where
+    F: FnOnce(&Connection) -> Result<(), String>,
+    L: FnOnce(&Connection, &mut Connection) -> Result<(), String>,
+    R: FnOnce(&Connection, &mut Connection) -> Result<(), String>,
+{
     let app_dir = database
         .db_path
         .parent()
         .ok_or_else(|| "无法定位数据库目录".to_string())?;
-    let mut staging = prepare_restore_staging(backup_path, app_dir)?;
+    validate_backup_source(preview)?;
+    let mut staging = prepare_restore_staging_from_source(preview, app_dir)?;
     let restore_result = (|| {
         let mut live = database.conn.lock().map_err(|e| e.to_string())?;
 
@@ -3338,7 +3941,7 @@ where
         }
 
         let safety_path = create_safety_snapshot(&live, &database.db_path)?;
-        if let Err(copy_error) = copy_database_snapshot(staging.connection(), &mut live) {
+        if let Err(copy_error) = live_copier(staging.connection(), &mut live) {
             return Err(format!(
                 "恢复写入未完成，当前数据库保持原状: {copy_error}\n安全快照: {}",
                 safety_path.display()
@@ -3367,7 +3970,7 @@ where
 
         Ok(RestoreSuccess {
             safety_path,
-            staging_cleanup_warning: None,
+            cleanup_warning: None,
         })
     })();
 
@@ -3375,7 +3978,7 @@ where
     match (restore_result, cleanup_result) {
         (Ok(success), Ok(())) => Ok(success),
         (Ok(mut success), Err(cleanup_error)) => {
-            success.staging_cleanup_warning = Some(cleanup_error);
+            success.cleanup_warning = Some(format!("staging 清理失败: {cleanup_error}"));
             Ok(success)
         }
         (Err(error), Ok(())) => Err(error),
@@ -3386,55 +3989,19 @@ where
 }
 
 #[tauri::command]
-fn inspect_backup_file(backup_path: String) -> Result<serde_json::Value, String> {
-    let path = Path::new(&backup_path);
-    if !path.is_file() {
-        return Err("备份文件不存在".into());
-    }
+fn inspect_backup_file(
+    state: tauri::State<'_, Database>,
+    backup_path: String,
+) -> Result<serde_json::Value, String> {
+    inspect_backup_file_inner(&state, Path::new(&backup_path))
+}
 
-    let file_size_bytes = fs::metadata(path)
-        .map_err(|e| format!("无法读取备份文件信息: {e}"))?
-        .len();
-    let conn = open_backup_read_only(path)?;
-    validate_backup_source(&conn)?;
-
-    let version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|e| format!("无法读取数据库版本: {e}"))?;
-
-    // 额外检查：sqlite_master 中有多少张用户表
-    let total_user_tables: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("无法统计数据库数据表: {e}"))?;
-
-    let mut table_info = serde_json::Map::new();
-    for table in REQUIRED_TABLES.iter().chain(RSIP_TABLES.iter()) {
-        if table_exists(&conn, table)? {
-            let count: i64 = conn
-                .query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
-                    row.get(0)
-                })
-                .map_err(|e| format!("无法统计数据表 {table}: {e}"))?;
-            table_info.insert(table.to_string(), serde_json::json!(count));
-        } else {
-            table_info.insert(
-                table.to_string(),
-                serde_json::Value::String("(表不存在)".into()),
-            );
-        }
-    }
-
-    Ok(serde_json::json!({
-        "path": backup_path,
-        "file_size_bytes": file_size_bytes,
-        "version": version,
-        "tables": table_info,
-        "total_user_tables": total_user_tables,
-    }))
+#[tauri::command]
+fn discard_restore_preview(
+    state: tauri::State<'_, Database>,
+    preview_path: String,
+) -> Result<(), String> {
+    discard_restore_preview_inner(&state, Path::new(&preview_path))
 }
 
 #[tauri::command]
@@ -3478,9 +4045,9 @@ fn restore_database(
         "恢复成功，数据已立即生效。\n恢复前安全快照: {}",
         result.safety_path.display()
     );
-    if let Some(cleanup_warning) = result.staging_cleanup_warning {
+    if let Some(cleanup_warning) = result.cleanup_warning {
         message.push_str(&format!(
-            "\n恢复已成功，但 staging 清理失败: {cleanup_warning}"
+            "\n恢复已成功，但临时文件清理失败: {cleanup_warning}"
         ));
     }
     Ok(message)
@@ -3779,6 +4346,7 @@ pub fn run() {
             backup_database,
             restore_database,
             inspect_backup_file,
+            discard_restore_preview,
             get_database_info,
             export_history_json,
             reset_history_and_progress,

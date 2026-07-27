@@ -62,6 +62,16 @@ fn create_protocol_backup(root: &Path) -> PathBuf {
     backup_path
 }
 
+fn inspect_backup_for_test(root: &Path, backup_path: &Path) -> Result<serde_json::Value, String> {
+    let database = Database::new(root.join("inspector-app")).unwrap();
+    inspect_backup_file_inner(&database, backup_path)
+}
+
+fn create_restore_preview(database: &Database, backup_path: &Path) -> PathBuf {
+    let info = inspect_backup_file_inner(database, backup_path).unwrap();
+    PathBuf::from(info["restore_preview_path"].as_str().unwrap())
+}
+
 fn sidecar_path(database_path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(format!("{}{}", database_path.display(), suffix))
 }
@@ -72,7 +82,7 @@ fn inspect_valid_backup_is_read_only() {
     let backup_path = create_protocol_backup(test_dir.path());
     let before = std::fs::read(&backup_path).unwrap();
 
-    let info = inspect_backup_file(backup_path.to_string_lossy().to_string()).unwrap();
+    let info = inspect_backup_for_test(test_dir.path(), &backup_path).unwrap();
 
     assert_eq!(info["version"].as_i64(), Some(CURRENT_DB_VERSION));
     assert_eq!(std::fs::read(&backup_path).unwrap(), before);
@@ -82,12 +92,94 @@ fn inspect_valid_backup_is_read_only() {
 }
 
 #[test]
+fn restore_uses_the_bytes_that_were_inspected_when_source_path_is_replaced() {
+    let test_dir = RestoreTestDir::new("inspect-replaced-source");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let source_a = Database::new(test_dir.path().join("source-a")).unwrap();
+    insert_chain(&source_a, "inspected-a");
+    let selected_path = test_dir.path().join("selected.sqlite");
+    write_restore_backup(&source_a, &selected_path);
+    drop(source_a);
+
+    let info = inspect_backup_file_inner(&live, &selected_path).unwrap();
+    assert_eq!(
+        info["source_path"].as_str(),
+        Some(selected_path.to_string_lossy().as_ref())
+    );
+    let preview_path = PathBuf::from(info["restore_preview_path"].as_str().unwrap());
+    let preview_writer = Connection::open(&preview_path).unwrap();
+    let write_error = preview_writer
+        .execute_batch("BEGIN IMMEDIATE; UPDATE chains SET name = 'tampered'; COMMIT;")
+        .unwrap_err();
+    assert!(write_error.to_string().contains("locked") || write_error.to_string().contains("busy"));
+    drop(preview_writer);
+
+    let source_b = Database::new(test_dir.path().join("source-b")).unwrap();
+    insert_chain(&source_b, "replacement-b");
+    let replacement_path = test_dir.path().join("replacement.sqlite");
+    write_restore_backup(&source_b, &replacement_path);
+    drop(source_b);
+    std::fs::remove_file(&selected_path).unwrap();
+    std::fs::rename(&replacement_path, &selected_path).unwrap();
+
+    restore_database_inner(&live, &preview_path).unwrap();
+
+    assert_eq!(chain_names(&live), vec!["inspected-a"]);
+    assert!(!preview_path.exists());
+    let replacement = open_backup_read_only(&selected_path).unwrap();
+    let replacement_name: String = replacement
+        .query_row("SELECT name FROM chains", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(replacement_name, "replacement-b");
+}
+
+#[test]
+fn discard_removes_only_the_exact_task_owned_preview() {
+    let test_dir = RestoreTestDir::new("preview-discard-ownership");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    let selected_path = create_protocol_backup(&test_dir.path().join("source"));
+    let source_before = std::fs::read(&selected_path).unwrap();
+    let info = inspect_backup_file_inner(&live, &selected_path).unwrap();
+    let preview_path = PathBuf::from(info["restore_preview_path"].as_str().unwrap());
+
+    let outside = test_dir.path().join(preview_path.file_name().unwrap());
+    std::fs::write(&outside, b"must stay").unwrap();
+    let outside_error = discard_restore_preview_inner(&live, &outside).unwrap_err();
+    assert!(outside_error.contains(".restore") || outside_error.contains("预览"));
+    assert!(outside.is_file());
+
+    let unrelated = preview_path
+        .parent()
+        .unwrap()
+        .join("restore-preview-not-task-owned.sqlite");
+    std::fs::write(&unrelated, b"must also stay").unwrap();
+    let unrelated_error = discard_restore_preview_inner(&live, &unrelated).unwrap_err();
+    assert!(unrelated_error.contains("预览") || unrelated_error.contains("身份"));
+    assert!(unrelated.is_file());
+
+    let impostor =
+        unique_database_path(preview_path.parent().unwrap(), RESTORE_PREVIEW_PREFIX).unwrap();
+    let impostor_error = discard_restore_preview_inner(&live, &impostor).unwrap_err();
+    assert!(impostor_error.contains("任务") || impostor_error.contains("身份"));
+    assert!(impostor.is_file());
+
+    discard_restore_preview_inner(&live, &preview_path).unwrap();
+
+    for candidate in database_file_paths(&preview_path) {
+        assert!(!candidate.exists());
+    }
+    assert_eq!(std::fs::read(&selected_path).unwrap(), source_before);
+}
+
+#[test]
 fn inspect_rejects_corrupt_database_instead_of_reporting_zero_counts() {
     let test_dir = RestoreTestDir::new("inspect-corrupt");
     let path = test_dir.path().join("corrupt.sqlite");
     std::fs::write(&path, vec![b'x'; 8192]).unwrap();
 
-    let error = inspect_backup_file(path.to_string_lossy().to_string()).unwrap_err();
+    let error = inspect_backup_for_test(test_dir.path(), &path).unwrap_err();
 
     assert!(error.contains("SQLite") || error.contains("完整性"));
 }
@@ -107,7 +199,7 @@ fn inspect_rejects_database_missing_a_core_table() {
     .unwrap();
     drop(conn);
 
-    let error = inspect_backup_file(path.to_string_lossy().to_string()).unwrap_err();
+    let error = inspect_backup_for_test(test_dir.path(), &path).unwrap_err();
 
     assert!(error.contains("app_settings"));
 }
@@ -121,7 +213,7 @@ fn inspect_rejects_newer_database_version() {
         .unwrap();
     drop(conn);
 
-    let error = inspect_backup_file(path.to_string_lossy().to_string()).unwrap_err();
+    let error = inspect_backup_for_test(test_dir.path(), &path).unwrap_err();
 
     assert!(error.contains("版本"));
     assert!(error.contains(&(CURRENT_DB_VERSION + 1).to_string()));
@@ -145,12 +237,84 @@ fn inspect_rejects_active_wal_database_without_touching_sidecars() {
     let wal_before = std::fs::read(&wal_path).unwrap();
     let shm_before = std::fs::read(&shm_path).unwrap();
 
-    let error = inspect_backup_file(path.to_string_lossy().to_string()).unwrap_err();
+    let error = inspect_backup_for_test(test_dir.path(), &path).unwrap_err();
 
-    assert!(error.contains("活动 WAL"));
+    assert!(error.contains("WAL"), "{error}");
     assert_eq!(std::fs::read(&path).unwrap(), main_before);
     assert_eq!(std::fs::read(&wal_path).unwrap(), wal_before);
     assert_eq!(std::fs::read(&shm_path).unwrap(), shm_before);
+}
+
+#[test]
+fn inspect_rejects_a_rollback_journal_without_touching_source_files() {
+    let test_dir = RestoreTestDir::new("inspect-rollback-journal");
+    let path = create_protocol_backup(test_dir.path());
+    let journal_path = sidecar_path(&path, "-journal");
+    std::fs::write(&journal_path, b"").unwrap();
+    let main_before = std::fs::read(&path).unwrap();
+    let journal_before = std::fs::read(&journal_path).unwrap();
+
+    let error = inspect_backup_for_test(test_dir.path(), &path).unwrap_err();
+
+    assert!(
+        error.contains("journal") || error.contains("自包含"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), main_before);
+    assert_eq!(std::fs::read(&journal_path).unwrap(), journal_before);
+}
+
+#[test]
+fn inspection_rejects_source_replacement_after_binding_file_identity() {
+    let test_dir = RestoreTestDir::new("inspect-source-identity-race");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    let selected_path = create_protocol_backup(&test_dir.path().join("source-a"));
+    let source_a_moved = test_dir.path().join("source-a-moved.sqlite");
+
+    let source_b = Database::new(test_dir.path().join("source-b-app")).unwrap();
+    insert_chain(&source_b, "replacement-b");
+    let replacement_path = test_dir.path().join("replacement.sqlite");
+    write_restore_backup(&source_b, &replacement_path);
+    drop(source_b);
+
+    let error = inspect_backup_file_inner_impl(
+        &live,
+        &selected_path,
+        |bound_path| {
+            std::fs::rename(bound_path, &source_a_moved).unwrap();
+            std::fs::rename(&replacement_path, bound_path).unwrap();
+        },
+        |_| {},
+    )
+    .unwrap_err();
+
+    assert!(error.contains("替换") || error.contains("身份"));
+    assert!(source_a_moved.is_file());
+    assert!(selected_path.is_file());
+}
+
+#[test]
+fn inspection_rejects_a_sidecar_created_after_read_snapshot_is_pinned() {
+    let test_dir = RestoreTestDir::new("inspect-late-sidecar");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    let selected_path = create_protocol_backup(&test_dir.path().join("source"));
+    let late_journal = sidecar_path(&selected_path, "-journal");
+
+    let error = inspect_backup_file_inner_impl(
+        &live,
+        &selected_path,
+        |_| {},
+        |bound_path| {
+            std::fs::write(sidecar_path(bound_path, "-journal"), b"").unwrap();
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        error.contains("journal") || error.contains("自包含"),
+        "{error}"
+    );
+    assert!(late_journal.is_file());
 }
 
 fn create_legacy_protocol_database(path: &Path) {
@@ -344,26 +508,29 @@ fn snapshot_copy_includes_committed_live_wal_content() {
 }
 
 #[test]
-fn staging_revalidates_the_authoritative_snapshot_version() {
+fn pinned_read_snapshot_prevents_version_change_before_staging_copy() {
     let test_dir = RestoreTestDir::new("staging-version-race");
     let source_path = create_protocol_backup(test_dir.path());
     let source = open_backup_read_only(&source_path).unwrap();
     validate_backup_source(&source).unwrap();
 
     let writer = Connection::open(&source_path).unwrap();
-    writer
+    let write_error = writer
         .pragma_update(None, "user_version", CURRENT_DB_VERSION + 1)
-        .unwrap();
+        .unwrap_err();
     drop(writer);
+    assert!(
+        write_error.to_string().to_lowercase().contains("locked")
+            || write_error.to_string().to_lowercase().contains("busy")
+    );
 
-    let error = match prepare_restore_staging_from_source(&source, &test_dir.path().join("staging"))
-    {
-        Ok(_) => panic!("staging accepted a snapshot that changed to a newer version"),
-        Err(error) => error,
-    };
-
-    assert!(error.contains("版本"));
-    assert!(error.contains(&(CURRENT_DB_VERSION + 1).to_string()));
+    let staging =
+        prepare_restore_staging_from_source(&source, &test_dir.path().join("staging")).unwrap();
+    let staged_version: i64 = staging
+        .connection()
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(staged_version, CURRENT_DB_VERSION);
 }
 
 #[test]
@@ -470,13 +637,92 @@ fn stale_cleanup_removes_only_old_task_owned_staging_files() {
 }
 
 #[test]
+fn stale_cleanup_removes_old_orphan_staging_sidecars_only() {
+    let test_dir = RestoreTestDir::new("staging-stale-orphan-sidecars");
+    let staging_dir = test_dir.path().join(".restore");
+    std::fs::create_dir_all(&staging_dir).unwrap();
+
+    let stale_main = unique_database_path(&staging_dir, "staging").unwrap();
+    std::fs::remove_file(&stale_main).unwrap();
+    let old_modified = SystemTime::now() - Duration::from_secs(2 * 60 * 60);
+    let mut stale_sidecars = Vec::new();
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = sidecar_path(&stale_main, suffix);
+        std::fs::write(&sidecar, b"orphan").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&sidecar)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_modified))
+            .unwrap();
+        stale_sidecars.push(sidecar);
+    }
+
+    let recent_main = unique_database_path(&staging_dir, "staging").unwrap();
+    std::fs::remove_file(&recent_main).unwrap();
+    let recent_sidecar = sidecar_path(&recent_main, "-wal");
+    std::fs::write(&recent_sidecar, b"recent").unwrap();
+    let unrelated = staging_dir.join("staging-not-task-owned.sqlite-wal");
+    std::fs::write(&unrelated, b"keep").unwrap();
+
+    cleanup_stale_staging_files(
+        &staging_dir,
+        SystemTime::now(),
+        Duration::from_secs(60 * 60),
+        None,
+    )
+    .unwrap();
+
+    for sidecar in stale_sidecars {
+        assert!(!sidecar.exists(), "stale orphan should be removed");
+    }
+    assert!(recent_sidecar.exists());
+    assert!(unrelated.exists());
+}
+
+#[test]
+fn stale_cleanup_removes_old_preview_artifacts_but_keeps_recent_ones() {
+    let test_dir = RestoreTestDir::new("preview-stale-cleanup");
+    let restore_dir = test_dir.path().join(".restore");
+    std::fs::create_dir_all(&restore_dir).unwrap();
+
+    let stale_preview = unique_database_path(&restore_dir, "restore-preview").unwrap();
+    let stale_sidecar = sidecar_path(&stale_preview, "-journal");
+    std::fs::write(&stale_sidecar, b"orphan").unwrap();
+    let old_modified = SystemTime::now() - Duration::from_secs(2 * 60 * 60);
+    for path in [&stale_preview, &stale_sidecar] {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_modified))
+            .unwrap();
+    }
+
+    let recent_preview = unique_database_path(&restore_dir, "restore-preview").unwrap();
+
+    cleanup_stale_staging_files(
+        &restore_dir,
+        SystemTime::now(),
+        Duration::from_secs(60 * 60),
+        None,
+    )
+    .unwrap();
+
+    assert!(!stale_preview.exists());
+    assert!(!stale_sidecar.exists());
+    assert!(recent_preview.exists());
+}
+
+#[test]
 fn stale_cleanup_preserves_selected_old_task_owned_source() {
     let test_dir = RestoreTestDir::new("staging-stale-selected-source");
     let staging_root = test_dir.path().join("staging-root");
     let staging_dir = staging_root.join(".restore");
     std::fs::create_dir_all(&staging_dir).unwrap();
     let backup_path = create_protocol_backup(&test_dir.path().join("source"));
-    let selected_source = staging_dir.join("staging-selected.sqlite");
+    let selected_source = unique_database_path(&staging_dir, RESTORE_STAGING_PREFIX).unwrap();
+    std::fs::remove_file(&selected_source).unwrap();
     std::fs::rename(&backup_path, &selected_source).unwrap();
     let old_modified = SystemTime::now() - Duration::from_secs(8 * 24 * 60 * 60);
     std::fs::File::options()
@@ -506,9 +752,14 @@ fn inspect_rejects_truncated_sqlite_database() {
         .set_len(original_len / 2)
         .unwrap();
 
-    let error = inspect_backup_file(path.to_string_lossy().to_string()).unwrap_err();
+    let error = inspect_backup_for_test(test_dir.path(), &path).unwrap_err();
 
-    assert!(error.contains("SQLite") || error.contains("完整性"));
+    assert!(
+        error.contains("SQLite")
+            || error.contains("完整性")
+            || error.to_lowercase().contains("malformed"),
+        "{error}"
+    );
 }
 
 fn insert_chain(database: &Database, name: &str) {
@@ -551,8 +802,9 @@ fn restore_applies_backup_to_existing_connection_and_keeps_safety_snapshot() {
     let backup_path = backup_dir.join("restore.sqlite");
     write_restore_backup(&backup, &backup_path);
     drop(backup);
+    let preview_path = create_restore_preview(&live, &backup_path);
 
-    let result = restore_database_inner(&live, &backup_path).unwrap();
+    let result = restore_database_inner(&live, &preview_path).unwrap();
 
     assert_eq!(chain_names(&live), vec!["backup-new"]);
     let conn = live.conn.lock().unwrap();
@@ -576,7 +828,7 @@ fn restore_applies_backup_to_existing_connection_and_keeps_safety_snapshot() {
 }
 
 #[test]
-fn restore_rejects_live_database_as_its_own_source() {
+fn restore_rejects_non_preview_path_including_live_database() {
     let test_dir = RestoreTestDir::new("restore-self");
     let live_dir = test_dir.path().join("live");
     let live = Database::new(live_dir.clone()).unwrap();
@@ -584,7 +836,7 @@ fn restore_rejects_live_database_as_its_own_source() {
 
     let error = restore_database_inner(&live, &live_dir.join("protocol.db")).unwrap_err();
 
-    assert!(error.contains("当前数据库"));
+    assert!(error.contains("预览"));
     assert_eq!(chain_names(&live), vec!["live-old"]);
 }
 
@@ -613,11 +865,41 @@ fn restore_rejects_page_size_mismatch_before_touching_live() {
         .unwrap();
     drop(backup_conn);
     assert_eq!(backup_page_size, 8192);
+    let preview_path = create_restore_preview(&live, &backup_path);
 
-    let error = restore_database_inner(&live, &backup_path).unwrap_err();
+    let error = restore_database_inner(&live, &preview_path).unwrap_err();
 
     assert!(error.contains("page size"));
     assert_eq!(chain_names(&live), vec!["live-old"]);
+}
+
+#[test]
+fn failed_restore_attempt_discards_the_one_use_preview() {
+    let test_dir = RestoreTestDir::new("restore-failed-preview-cleanup");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let source_path = create_protocol_backup(&test_dir.path().join("source"));
+    let source = Connection::open(&source_path).unwrap();
+    source
+        .execute_batch(
+            "PRAGMA journal_mode=DELETE;
+             PRAGMA page_size=8192;
+             VACUUM;",
+        )
+        .unwrap();
+    drop(source);
+    let info = inspect_backup_file_inner(&live, &source_path).unwrap();
+    let preview_path = PathBuf::from(info["restore_preview_path"].as_str().unwrap());
+
+    let error = restore_database_inner(&live, &preview_path).unwrap_err();
+
+    assert!(error.contains("page size"));
+    assert_eq!(chain_names(&live), vec!["live-old"]);
+    for candidate in database_file_paths(&preview_path) {
+        assert!(!candidate.exists());
+    }
+    assert!(source_path.is_file());
 }
 
 #[test]
@@ -633,9 +915,11 @@ fn rapid_restores_create_distinct_safety_snapshots() {
     write_restore_backup(&backup, &backup_path);
     drop(backup);
 
-    let first = restore_database_inner(&live, &backup_path).unwrap();
+    let first_preview = create_restore_preview(&live, &backup_path);
+    let first = restore_database_inner(&live, &first_preview).unwrap();
     insert_chain(&live, "between-restores");
-    let second = restore_database_inner(&live, &backup_path).unwrap();
+    let second_preview = create_restore_preview(&live, &backup_path);
+    let second = restore_database_inner(&live, &second_preview).unwrap();
 
     assert_ne!(first.safety_path, second.safety_path);
     assert!(first.safety_path.is_file());
@@ -680,8 +964,9 @@ fn restore_round_trip_preserves_all_application_tables() {
     let backup_path = backup_dir.join("restore.sqlite");
     write_restore_backup(&backup, &backup_path);
     drop(backup);
+    let preview_path = create_restore_preview(&live, &backup_path);
 
-    restore_database_inner(&live, &backup_path).unwrap();
+    restore_database_inner(&live, &preview_path).unwrap();
 
     let conn = live.conn.lock().unwrap();
     for table in [
@@ -770,10 +1055,15 @@ fn post_restore_validation_failure_rolls_back_safety_snapshot() {
     let backup_path = backup_dir.join("restore.sqlite");
     write_restore_backup(&backup, &backup_path);
     drop(backup);
+    let preview_path = create_restore_preview(&live, &backup_path);
 
-    let error = restore_database_inner_with_validator(&live, &backup_path, |_| {
-        Err("injected post-copy failure".into())
-    })
+    let error = restore_database_inner_impl(
+        &live,
+        &preview_path,
+        |_| Err("injected post-copy failure".into()),
+        copy_database_snapshot,
+        copy_database_snapshot,
+    )
     .unwrap_err();
 
     assert!(error.contains("injected post-copy failure"));
@@ -793,11 +1083,13 @@ fn restore_rollback_failure_reports_both_errors_and_preserves_safety_snapshot() 
     let backup_path = backup_dir.join("restore.sqlite");
     write_restore_backup(&backup, &backup_path);
     drop(backup);
+    let preview_path = create_restore_preview(&live, &backup_path);
 
-    let error = restore_database_inner_with_hooks(
+    let error = restore_database_inner_impl(
         &live,
-        &backup_path,
+        &preview_path,
         |_| Err("injected post-copy failure".into()),
+        copy_database_snapshot,
         |_, _| Err("injected rollback failure".into()),
     )
     .unwrap_err();
@@ -810,6 +1102,52 @@ fn restore_rollback_failure_reports_both_errors_and_preserves_safety_snapshot() 
         .map(PathBuf::from)
         .expect("error should preserve the safety snapshot path");
     assert!(safety_path.is_file());
+}
+
+#[test]
+fn primary_live_copy_failure_keeps_recoverable_safety_snapshot() {
+    let test_dir = RestoreTestDir::new("restore-primary-copy-failure");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    insert_chain(&live, "live-old");
+
+    let backup_dir = test_dir.path().join("backup");
+    let backup = Database::new(backup_dir.clone()).unwrap();
+    insert_chain(&backup, "backup-new");
+    let backup_path = backup_dir.join("restore.sqlite");
+    write_restore_backup(&backup, &backup_path);
+    drop(backup);
+    let preview_path = create_restore_preview(&live, &backup_path);
+
+    let live_path = live.db_path.clone();
+    let error = restore_database_inner_impl(
+        &live,
+        &preview_path,
+        validate_current_schema,
+        |source, destination| {
+            let locking_connection = Connection::open(&live_path).unwrap();
+            locking_connection
+                .execute_batch("BEGIN EXCLUSIVE; UPDATE chains SET name = name;")
+                .unwrap();
+            let result = copy_database_snapshot(source, destination);
+            locking_connection.execute_batch("ROLLBACK").unwrap();
+            result
+        },
+        copy_database_snapshot,
+    )
+    .unwrap_err();
+
+    let safety_path = error
+        .lines()
+        .find_map(|line| line.strip_prefix("安全快照: "))
+        .map(PathBuf::from)
+        .expect("primary copy failure should report the preserved safety snapshot");
+    assert!(safety_path.is_file());
+    assert_eq!(chain_names(&live), vec!["live-old"]);
+    let safety = open_backup_read_only(&safety_path).unwrap();
+    let safety_name: String = safety
+        .query_row("SELECT name FROM chains", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(safety_name, "live-old");
 }
 
 #[test]
@@ -827,26 +1165,38 @@ fn restore_holds_database_mutex_through_post_copy_validation() {
     let backup_path = backup_dir.join("restore.sqlite");
     write_restore_backup(&backup, &backup_path);
     drop(backup);
+    let preview_path = create_restore_preview(&live, &backup_path);
 
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let restore_live = Arc::clone(&live);
     let restore_thread = std::thread::spawn(move || {
-        restore_database_inner_with_validator(&restore_live, &backup_path, |conn| {
-            entered_tx.send(()).unwrap();
-            release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-            validate_current_schema(conn)
-        })
+        restore_database_inner_impl(
+            &restore_live,
+            &preview_path,
+            |conn| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                validate_current_schema(conn)
+            },
+            copy_database_snapshot,
+            copy_database_snapshot,
+        )
     });
 
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (about_to_lock_tx, about_to_lock_rx) = mpsc::channel();
     let (acquired_tx, acquired_rx) = mpsc::channel();
     let query_live = Arc::clone(&live);
     let query_thread = std::thread::spawn(move || {
+        about_to_lock_tx.send(()).unwrap();
         let _guard = query_live.conn.lock().unwrap();
         acquired_tx.send(()).unwrap();
     });
 
+    about_to_lock_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
     assert!(acquired_rx
         .recv_timeout(Duration::from_millis(100))
         .is_err());

@@ -6,6 +6,7 @@ import {
   backupDatabase,
   restoreDatabase,
   inspectBackupFile,
+  discardRestorePreview,
   exportHistoryJson,
   resetHistoryAndProgress,
 } from '../lib/db';
@@ -49,6 +50,7 @@ export default function DataManagement() {
     try {
       const info = await getDatabaseInfo();
       setDbInfo(info);
+      setError('');
     } catch (err) {
       setError(String(err));
     }
@@ -90,7 +92,18 @@ export default function DataManagement() {
 
   const handleRestoreSelect = async () => {
     clearMessages();
-    setBackupInfo(null);
+    if (backupInfo) {
+      setBusy(true);
+      try {
+        await discardRestorePreview(backupInfo.restore_preview_path);
+        setBackupInfo(null);
+      } catch (err) {
+        setRestoreError(`无法清理上一个恢复预览: ${String(err)}`);
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+    }
 
     const selected = await open({
       multiple: false,
@@ -113,8 +126,18 @@ export default function DataManagement() {
     }
   };
 
-  const handleRestoreCancel = () => {
-    setBackupInfo(null);
+  const handleRestoreCancel = async () => {
+    if (!backupInfo) return;
+    clearMessages();
+    setBusy(true);
+    try {
+      await discardRestorePreview(backupInfo.restore_preview_path);
+      setBackupInfo(null);
+    } catch (err) {
+      setRestoreError(`无法清理恢复预览，请重试: ${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleRestoreConfirm = async () => {
@@ -122,8 +145,7 @@ export default function DataManagement() {
     clearMessages();
     setBusy(true);
     try {
-      const result = await restoreDatabase(backupInfo.path);
-      setBackupInfo(null);
+      const result = await restoreDatabase(backupInfo.restore_preview_path);
       setSuccess(result);
       try {
         const info = await getDatabaseInfo();
@@ -135,6 +157,7 @@ export default function DataManagement() {
     } catch (err) {
       setError(String(err));
     } finally {
+      setBackupInfo(null);
       setBusy(false);
     }
   };
@@ -271,7 +294,7 @@ export default function DataManagement() {
       {/* ===== Database Info ===== */}
       <section className="dm-section">
         <h3>数据库信息</h3>
-        {dbInfo && (
+        {dbInfo ? (
           <div className="dm-info-layout">
             <div className="dm-path-panel">
               <span className="dm-info-label">数据库路径</span>
@@ -301,6 +324,17 @@ export default function DataManagement() {
             <div className="dm-section-actions">
               <button className="btn btn-secondary" onClick={refreshInfo} disabled={busy}>
                 刷新信息
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="dm-info-layout">
+            <p className="dm-desc">
+              数据库统计暂时不可用。数据库仍可继续使用；请重试加载以确认当前文件和记录数量。
+            </p>
+            <div className="dm-section-actions">
+              <button className="btn btn-secondary" onClick={refreshInfo} disabled={busy}>
+                重试加载数据库统计
               </button>
             </div>
           </div>
@@ -342,7 +376,7 @@ export default function DataManagement() {
             <div className="dm-backup-info-grid">
               <div className="dm-backup-info-item">
                 <span>文件路径</span>
-                <code className="code-path">{backupInfo.path}</code>
+                <code className="code-path">{backupInfo.source_path}</code>
               </div>
               <div className="dm-backup-info-item">
                 <span>文件大小</span>
@@ -361,12 +395,18 @@ export default function DataManagement() {
               {renderTableCount('定式', backupInfo.tables.rsip_formulas)}
               {renderTableCount('定式事件', backupInfo.tables.formula_events)}
             </div>
+            <p className="dm-confirm-detail">
+              以上信息来自应用创建的一次性恢复预览。确认恢复只会读取该预览；取消、重新选择或恢复完成后会清理预览，所选原文件不会被修改。
+            </p>
             <p className="dm-confirm-warn">
               当前数据将被完整替换。确认后应用会立即切换到备份数据。
             </p>
             <div className="dm-confirm-actions">
               <button className="btn btn-secondary" onClick={handleRestoreCancel} disabled={busy}>
                 取消
+              </button>
+              <button className="btn btn-secondary" onClick={handleRestoreSelect} disabled={busy}>
+                重新选择
               </button>
               <button className="btn btn-danger" onClick={handleRestoreConfirm} disabled={busy}>
                 {busy ? '恢复中...' : '确认恢复'}
