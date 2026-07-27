@@ -1,10 +1,14 @@
 mod db;
 
-use db::{Database, CURRENT_DB_VERSION};
+use db::{initialize_schema_on, Database, CURRENT_DB_VERSION};
+use rusqlite::backup::{Backup, StepResult};
 use rusqlite::{Connection, OpenFlags};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::Manager;
@@ -12,6 +16,19 @@ use tauri::Manager;
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
 const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at, goal_id, failure_path_id, intervention_node_id, dependency_note";
+const CURRENT_SCHEMA_PROBES: &[(&str, &str)] = &[
+    ("chains", "SELECT id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at FROM chains LIMIT 0"),
+    ("focus_sessions", "SELECT id, chain_id, started_at, expected_end_at, ended_at, duration_minutes, result, failure_note, trigger_action, completion_condition, debug_category, debug_note, created_at FROM focus_sessions LIMIT 0"),
+    ("reservation_sessions", "SELECT id, chain_id, created_at, due_at, confirmation_due_at, fulfilled_at, result, failure_note, trigger_action, completion_condition, debug_category, debug_note FROM reservation_sessions LIMIT 0"),
+    ("precedents", "SELECT id, chain_id, scope, title, description, created_from_session_id, created_from_session_type, status, created_at, updated_at, retired_at FROM precedents LIMIT 0"),
+    ("app_settings", "SELECT key, value FROM app_settings LIMIT 0"),
+    ("rsip_formulas", "SELECT id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at, goal_id, failure_path_id, intervention_node_id, dependency_note FROM rsip_formulas LIMIT 0"),
+    ("formula_events", "SELECT id, formula_id, event_type, note, created_at FROM formula_events LIMIT 0"),
+    ("rsip_goals", "SELECT id, title, description, status, created_at, updated_at, archived_at FROM rsip_goals LIMIT 0"),
+    ("rsip_failure_paths", "SELECT id, goal_id, title, nodes_json, created_at, updated_at FROM rsip_failure_paths LIMIT 0"),
+];
+
+static RESTORE_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn clean_option(value: Option<String>) -> String {
     value.unwrap_or_default().trim().to_string()
@@ -2933,6 +2950,219 @@ fn validate_backup_source(conn: &Connection) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn validate_current_schema(conn: &Connection) -> Result<(), String> {
+    check_database_integrity(conn)?;
+
+    let mut foreign_key_statement = conn
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(|e| format!("无法执行外键检查: {e}"))?;
+    let mut foreign_key_rows = foreign_key_statement
+        .query([])
+        .map_err(|e| format!("无法读取外键检查结果: {e}"))?;
+    if foreign_key_rows
+        .next()
+        .map_err(|e| format!("无法读取外键检查结果: {e}"))?
+        .is_some()
+    {
+        return Err("数据库存在外键约束错误".into());
+    }
+
+    for (table, sql) in CURRENT_SCHEMA_PROBES {
+        conn.prepare(sql)
+            .map_err(|e| format!("数据表 {table} 缺少当前版本所需字段: {e}"))?;
+    }
+    Ok(())
+}
+
+fn copy_database_snapshot(source: &Connection, destination: &mut Connection) -> Result<(), String> {
+    let step_result = {
+        let backup = Backup::new(source, destination)
+            .map_err(|e| format!("无法初始化 SQLite 快照复制，数据库可能被锁定或占用: {e}"))?;
+        backup
+            .step(-1)
+            .map_err(|e| format!("SQLite 快照复制失败，数据库可能被锁定或占用: {e}"))?
+    };
+
+    match step_result {
+        StepResult::Done => Ok(()),
+        StepResult::Busy => Err("数据库正在被其他连接占用或锁定".into()),
+        StepResult::Locked => Err("数据库被写事务锁定".into()),
+        StepResult::More => Err("SQLite 快照复制未在单次操作中完成".into()),
+        _ => Err("SQLite 返回未知快照状态".into()),
+    }
+}
+
+#[cfg(test)]
+fn copy_database_snapshot_then_abort(
+    source: &Connection,
+    destination: &mut Connection,
+    pages: i32,
+) -> Result<StepResult, String> {
+    let backup =
+        Backup::new(source, destination).map_err(|e| format!("无法初始化测试快照复制: {e}"))?;
+    let result = backup
+        .step(pages)
+        .map_err(|e| format!("测试快照复制失败: {e}"))?;
+    drop(backup);
+    Ok(result)
+}
+
+fn unique_database_path(dir: &Path, prefix: &str) -> Result<PathBuf, String> {
+    fs::create_dir_all(dir).map_err(|e| format!("无法创建数据库临时目录: {e}"))?;
+    for _ in 0..100 {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("系统时间异常: {e}"))?
+            .as_nanos();
+        let counter = RESTORE_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!(
+            "{prefix}-{nanos}-{}-{counter}.sqlite",
+            std::process::id()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => {
+                drop(file);
+                return Ok(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("无法创建数据库临时文件: {error}")),
+        }
+    }
+    Err("无法生成唯一数据库临时文件名".into())
+}
+
+fn remove_database_files(path: &Path) -> Result<(), String> {
+    let sidecar = |suffix: &str| {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        PathBuf::from(name)
+    };
+    let candidates = [
+        path.to_path_buf(),
+        sidecar("-wal"),
+        sidecar("-shm"),
+        sidecar("-journal"),
+    ];
+    let mut errors = Vec::new();
+    for candidate in &candidates {
+        match fs::remove_file(candidate) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => errors.push(format!("{}: {error}", candidate.display())),
+        }
+    }
+    for candidate in &candidates {
+        if candidate.exists() {
+            errors.push(format!("清理后文件仍存在: {}", candidate.display()));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+fn cleanup_stale_staging_files(
+    staging_dir: &Path,
+    now: SystemTime,
+    minimum_age: Duration,
+) -> Result<(), String> {
+    if !staging_dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(staging_dir).map_err(|e| format!("无法扫描 staging 目录: {e}"))?
+    {
+        let entry = entry.map_err(|e| format!("无法读取 staging 条目: {e}"))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("staging-") || !name.ends_with(".sqlite") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .map_err(|e| format!("无法读取 staging 修改时间: {e}"))?;
+        if now.duration_since(modified).unwrap_or_default() >= minimum_age {
+            remove_database_files(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+struct StagedDatabase {
+    path: PathBuf,
+    connection: Option<Connection>,
+}
+
+impl StagedDatabase {
+    fn connection(&self) -> &Connection {
+        self.connection.as_ref().expect("staging connection exists")
+    }
+
+    fn cleanup(&mut self) -> Result<(), String> {
+        drop(self.connection.take());
+        remove_database_files(&self.path)
+    }
+}
+
+impl Drop for StagedDatabase {
+    fn drop(&mut self) {
+        drop(self.connection.take());
+        let _ = remove_database_files(&self.path);
+    }
+}
+
+fn prepare_restore_staging_from_source(
+    source: &Connection,
+    app_dir: &Path,
+) -> Result<StagedDatabase, String> {
+    let staging_dir = app_dir.join(".restore");
+    let staging_path = unique_database_path(&staging_dir, "staging")?;
+    let result = (|| {
+        let mut staging = Connection::open(&staging_path)
+            .map_err(|e| format!("无法打开恢复 staging 数据库: {e}"))?;
+        copy_database_snapshot(source, &mut staging)?;
+        validate_backup_source(&staging)?;
+        staging
+            .execute_batch("PRAGMA foreign_keys=ON;")
+            .map_err(|e| format!("无法启用 staging 外键: {e}"))?;
+        initialize_schema_on(&staging).map_err(|e| format!("无法升级恢复 staging 数据库: {e}"))?;
+        validate_current_schema(&staging)?;
+        let version: i64 = staging
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|e| format!("无法读取 staging 数据库版本: {e}"))?;
+        if version != CURRENT_DB_VERSION {
+            return Err(format!(
+                "staging 数据库版本 {version} 未迁移到 {CURRENT_DB_VERSION}"
+            ));
+        }
+        Ok(staging)
+    })();
+
+    match result {
+        Ok(connection) => Ok(StagedDatabase {
+            path: staging_path,
+            connection: Some(connection),
+        }),
+        Err(error) => match remove_database_files(&staging_path) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(format!("{error}; staging 清理也失败: {cleanup_error}")),
+        },
+    }
+}
+
+fn prepare_restore_staging(backup_path: &Path, app_dir: &Path) -> Result<StagedDatabase, String> {
+    let staging_dir = app_dir.join(".restore");
+    cleanup_stale_staging_files(
+        &staging_dir,
+        SystemTime::now(),
+        Duration::from_secs(7 * 24 * 60 * 60),
+    )?;
+    let source = open_backup_read_only(backup_path)?;
+    validate_backup_source(&source)?;
+    prepare_restore_staging_from_source(&source, app_dir)
 }
 
 fn validate_backup_file(path: &Path) -> Result<(), String> {

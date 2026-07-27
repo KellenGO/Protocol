@@ -16,22 +16,19 @@ impl Database {
 
         let db_path = app_dir.join("protocol.db");
         let conn = Connection::open(&db_path)?;
-
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        initialize_schema_on(&conn)?;
 
-        let db = Database {
+        Ok(Database {
             conn: Mutex::new(conn),
             db_path,
-        };
-        db.initialize_schema()?;
-        Ok(db)
+        })
     }
+}
 
-    fn initialize_schema(&self) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
-
-        conn.execute_batch(
+pub(crate) fn initialize_schema_on(conn: &Connection) -> SqliteResult<()> {
+    conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS chains (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,19 +152,17 @@ impl Database {
             ",
         )?;
 
-        migrate_precedents_to_core_schema(&conn)?;
-        migrate_protocol_config_schema(&conn)?;
-        migrate_rsip_goal_translation_schema(&conn)?;
+    migrate_precedents_to_core_schema(conn)?;
+    migrate_protocol_config_schema(conn)?;
+    migrate_rsip_goal_translation_schema(conn)?;
 
-        let version: i64 = conn
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap_or(0);
-        if version == 0 {
-            conn.pragma_update(None, "user_version", CURRENT_DB_VERSION)?;
-        }
-
-        Ok(())
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap_or(0);
+    if version == 0 {
+        conn.pragma_update(None, "user_version", CURRENT_DB_VERSION)?;
     }
+    Ok(())
 }
 
 fn table_columns(conn: &Connection, table: &str) -> SqliteResult<Vec<String>> {
