@@ -3,6 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+pub(crate) const CURRENT_DB_VERSION: i64 = 1;
+
 pub struct Database {
     pub conn: Mutex<Connection>,
     pub db_path: PathBuf,
@@ -161,7 +163,7 @@ impl Database {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap_or(0);
         if version == 0 {
-            conn.pragma_update(None, "user_version", 1)?;
+            conn.pragma_update(None, "user_version", CURRENT_DB_VERSION)?;
         }
 
         Ok(())

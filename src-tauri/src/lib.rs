@@ -1,12 +1,13 @@
 mod db;
 
-use db::Database;
-use rusqlite::Connection;
+use db::{Database, CURRENT_DB_VERSION};
+use rusqlite::{Connection, OpenFlags};
 use std::fs;
-use std::path::Path;
-use tauri::Manager;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::Manager;
 
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
@@ -2853,76 +2854,112 @@ const RSIP_TABLES: &[&str] = &[
     "rsip_failure_paths",
 ];
 
-fn table_exists(conn: &Connection, table: &str) -> bool {
+fn database_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+fn validate_backup_sidecar_state(path: &Path) -> Result<(), String> {
+    let mut header = [0_u8; 20];
+    fs::File::open(path)
+        .map_err(|e| format!("无法读取备份文件头: {e}"))?
+        .read_exact(&mut header)
+        .map_err(|e| format!("备份文件头不完整: {e}"))?;
+    if &header[..16] != b"SQLite format 3\0" {
+        return Err("选择的文件不是有效的 SQLite 数据库".into());
+    }
+
+    let wal_mode = header[18] == 2 || header[19] == 2;
+    let wal_path = database_sidecar_path(path, "-wal");
+    let shm_path = database_sidecar_path(path, "-shm");
+    if wal_mode || wal_path.exists() || shm_path.exists() {
+        return Err(
+            "选择的是活动 WAL 数据库，不是自包含的 Protocol 备份；请先使用应用内 SQLite 备份"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn open_backup_read_only(path: &Path) -> Result<Connection, String> {
+    validate_backup_sidecar_state(path)?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    Connection::open_with_flags(path, flags).map_err(|e| format!("无法只读打开 SQLite 备份: {e}"))
+}
+
+fn check_database_integrity(conn: &Connection) -> Result<(), String> {
+    let result: String = conn
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(|e| format!("无法检查数据库完整性: {e}"))?;
+    if result == "ok" {
+        Ok(())
+    } else {
+        Err(format!("数据库完整性检查失败: {result}"))
+    }
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
         [table],
         |row| row.get::<_, i64>(0),
     )
-    .map(|c| c > 0)
-    .unwrap_or(false)
+    .map(|count| count > 0)
+    .map_err(|e| format!("无法检查数据表 {table}: {e}"))
 }
 
-fn validate_backup_file(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Err("备份文件不存在".into());
-    }
+fn validate_backup_source(conn: &Connection) -> Result<(), String> {
+    check_database_integrity(conn)?;
 
-    let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    if file_size_bytes < 4096 {
-        return Err(format!(
-            "备份文件大小异常 ({} bytes)，文件可能已损坏。",
-            file_size_bytes
-        ));
-    }
-
-    let test_conn =
-        Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
-
-    // 关闭 WAL 模式，确保读取主文件内容
-    let _ = test_conn.execute_batch("PRAGMA journal_mode=DELETE;");
-
-    let mut missing: Vec<String> = Vec::new();
+    let mut missing = Vec::new();
     for table in REQUIRED_TABLES {
-        if !table_exists(&test_conn, table) {
-            missing.push((*table).to_string());
+        if !table_exists(conn, table)? {
+            missing.push(*table);
         }
     }
     if !missing.is_empty() {
-        return Err(format!(
-            "备份文件缺少必要的表: {}\n该文件可能不是有效的 Protocol 数据库备份。",
-            missing.join(", ")
-        ));
+        return Err(format!("备份文件缺少必要的表: {}", missing.join(", ")));
     }
 
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|e| format!("无法读取数据库版本: {e}"))?;
+    if version > CURRENT_DB_VERSION {
+        return Err(format!(
+            "备份数据库版本 {version} 高于当前支持版本 {CURRENT_DB_VERSION}"
+        ));
+    }
     Ok(())
+}
+
+fn validate_backup_file(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err("备份文件不存在".into());
+    }
+
+    let conn = open_backup_read_only(path)?;
+    validate_backup_source(&conn)
 }
 
 #[tauri::command]
 fn inspect_backup_file(backup_path: String) -> Result<serde_json::Value, String> {
     let path = Path::new(&backup_path);
-    if !path.exists() {
+    if !path.is_file() {
         return Err("备份文件不存在".into());
     }
 
-    let file_size_bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    // 文件太小（小于 4KB）说明可能是空文件或损坏的备份
-    if file_size_bytes < 4096 {
-        return Err(format!(
-            "备份文件大小异常 ({} bytes)，该文件可能已损坏，请使用其他备份文件。",
-            file_size_bytes
-        ));
-    }
-
-    let conn =
-        Connection::open(path).map_err(|_| "选择的文件不是有效的 SQLite 数据库".to_string())?;
-
-    // 关闭 WAL 模式，确保读取的是主文件内容（处理旧版 fs::copy 备份的兼容问题）
-    let _ = conn.execute_batch("PRAGMA journal_mode=DELETE;");
+    let file_size_bytes = fs::metadata(path)
+        .map_err(|e| format!("无法读取备份文件信息: {e}"))?
+        .len();
+    let conn = open_backup_read_only(path)?;
+    validate_backup_source(&conn)?;
 
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
-        .unwrap_or(0);
+        .map_err(|e| format!("无法读取数据库版本: {e}"))?;
 
     // 额外检查：sqlite_master 中有多少张用户表
     let total_user_tables: i64 = conn
@@ -2931,18 +2968,16 @@ fn inspect_backup_file(backup_path: String) -> Result<serde_json::Value, String>
             [],
             |row| row.get(0),
         )
-        .unwrap_or(0);
+        .map_err(|e| format!("无法统计数据库数据表: {e}"))?;
 
     let mut table_info = serde_json::Map::new();
     for table in REQUIRED_TABLES.iter().chain(RSIP_TABLES.iter()) {
-        if table_exists(&conn, table) {
+        if table_exists(&conn, table)? {
             let count: i64 = conn
-                .query_row(
-                    &format!("SELECT COUNT(*) FROM {}", table),
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
+                .query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|e| format!("无法统计数据表 {table}: {e}"))?;
             table_info.insert(table.to_string(), serde_json::json!(count));
         } else {
             table_info.insert(
@@ -3340,6 +3375,9 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod restore_tests;
 
 #[cfg(test)]
 mod tests {
