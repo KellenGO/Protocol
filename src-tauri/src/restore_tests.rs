@@ -174,6 +174,26 @@ fn discard_removes_only_the_exact_task_owned_preview() {
 }
 
 #[test]
+fn pending_preview_reclamation_removes_only_registered_previews() {
+    let test_dir = RestoreTestDir::new("preview-pending-reclamation");
+    let live = Database::new(test_dir.path().join("live")).unwrap();
+    let selected_path = create_protocol_backup(&test_dir.path().join("source"));
+    let source_before = std::fs::read(&selected_path).unwrap();
+    let preview_path = create_restore_preview(&live, &selected_path);
+    let unregistered =
+        unique_database_path(preview_path.parent().unwrap(), RESTORE_PREVIEW_PREFIX).unwrap();
+    std::fs::write(&unregistered, b"must stay").unwrap();
+
+    discard_pending_restore_previews_inner(&live).unwrap();
+
+    for candidate in database_file_paths(&preview_path) {
+        assert!(!candidate.exists());
+    }
+    assert_eq!(std::fs::read(&unregistered).unwrap(), b"must stay");
+    assert_eq!(std::fs::read(&selected_path).unwrap(), source_before);
+}
+
+#[test]
 fn inspect_rejects_corrupt_database_instead_of_reporting_zero_counts() {
     let test_dir = RestoreTestDir::new("inspect-corrupt");
     let path = test_dir.path().join("corrupt.sqlite");

@@ -376,6 +376,10 @@ export async function discardRestorePreview(previewPath: string): Promise<void> 
   return invoke('discard_restore_preview', { previewPath });
 }
 
+export async function discardPendingRestorePreviews(): Promise<void> {
+  return invoke('discard_pending_restore_previews');
+}
+
 export async function getDatabaseInfo(): Promise<DatabaseInfo> {
   return invoke('get_database_info');
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -7,6 +7,7 @@ import {
   restoreDatabase,
   inspectBackupFile,
   discardRestorePreview,
+  discardPendingRestorePreviews,
   exportHistoryJson,
   resetHistoryAndProgress,
 } from '../lib/db';
@@ -34,6 +35,10 @@ export default function DataManagement() {
   // Restore flow
   const [backupInfo, setBackupInfo] = useState<BackupFileInfo | null>(null);
   const [restoreError, setRestoreError] = useState('');
+  const [restoreReady, setRestoreReady] = useState(false);
+  const activeRestorePreviewRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const pendingReclaimRef = useRef<Promise<void> | null>(null);
 
   // Reset flow
   const [resetStep, setResetStep] = useState(0); // 0=idle, 1=confirm, 2=input text
@@ -57,7 +62,31 @@ export default function DataManagement() {
   };
 
   useEffect(() => {
+    mountedRef.current = true;
+    let cancelled = false;
+    const pendingReclaim =
+      pendingReclaimRef.current ?? discardPendingRestorePreviews();
+    pendingReclaimRef.current = pendingReclaim;
+    pendingReclaim
+      .catch((err) => {
+        if (!cancelled) {
+          setRestoreError(`无法清理上次遗留的恢复预览: ${String(err)}`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRestoreReady(true);
+      });
     refreshInfo().finally(() => setLoading(false));
+
+    return () => {
+      cancelled = true;
+      mountedRef.current = false;
+      const previewPath = activeRestorePreviewRef.current;
+      activeRestorePreviewRef.current = null;
+      if (previewPath) {
+        void discardRestorePreview(previewPath).catch(() => {});
+      }
+    };
   }, []);
 
   const handleBackup = async () => {
@@ -91,17 +120,26 @@ export default function DataManagement() {
   // ---- Restore flow ----
 
   const handleRestoreSelect = async () => {
+    if (!restoreReady) return;
     clearMessages();
     if (backupInfo) {
+      const previewPath =
+        activeRestorePreviewRef.current ?? backupInfo.restore_preview_path;
+      activeRestorePreviewRef.current = null;
       setBusy(true);
       try {
-        await discardRestorePreview(backupInfo.restore_preview_path);
+        await discardRestorePreview(previewPath);
+        if (!mountedRef.current) return;
         setBackupInfo(null);
       } catch (err) {
-        setRestoreError(`无法清理上一个恢复预览: ${String(err)}`);
-        setBusy(false);
+        if (mountedRef.current) {
+          activeRestorePreviewRef.current = previewPath;
+          setRestoreError(`无法清理上一个恢复预览: ${String(err)}`);
+        }
+        if (mountedRef.current) setBusy(false);
         return;
       }
+      if (!mountedRef.current) return;
       setBusy(false);
     }
 
@@ -110,7 +148,7 @@ export default function DataManagement() {
       filters: [{ name: 'SQLite 数据库', extensions: ['sqlite', 'db'] }],
     });
 
-    if (!selected) return;
+    if (!selected || !mountedRef.current) return;
 
     const filePath = selected;
 
@@ -118,47 +156,64 @@ export default function DataManagement() {
     setBusy(true);
     try {
       const info = await inspectBackupFile(filePath);
+      if (!mountedRef.current) {
+        void discardRestorePreview(info.restore_preview_path).catch(() => {});
+        return;
+      }
+      activeRestorePreviewRef.current = info.restore_preview_path;
       setBackupInfo(info);
     } catch (err) {
-      setRestoreError(String(err));
+      if (mountedRef.current) setRestoreError(String(err));
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
 
   const handleRestoreCancel = async () => {
     if (!backupInfo) return;
+    const previewPath =
+      activeRestorePreviewRef.current ?? backupInfo.restore_preview_path;
+    activeRestorePreviewRef.current = null;
     clearMessages();
     setBusy(true);
     try {
-      await discardRestorePreview(backupInfo.restore_preview_path);
-      setBackupInfo(null);
+      await discardRestorePreview(previewPath);
+      if (mountedRef.current) setBackupInfo(null);
     } catch (err) {
-      setRestoreError(`无法清理恢复预览，请重试: ${String(err)}`);
+      if (mountedRef.current) {
+        activeRestorePreviewRef.current = previewPath;
+        setRestoreError(`无法清理恢复预览，请重试: ${String(err)}`);
+      }
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
 
   const handleRestoreConfirm = async () => {
     if (!backupInfo) return;
+    const previewPath =
+      activeRestorePreviewRef.current ?? backupInfo.restore_preview_path;
+    activeRestorePreviewRef.current = null;
+    setBackupInfo(null);
     clearMessages();
     setBusy(true);
     try {
-      const result = await restoreDatabase(backupInfo.restore_preview_path);
+      const result = await restoreDatabase(previewPath);
+      if (!mountedRef.current) return;
       setSuccess(result);
       try {
         const info = await getDatabaseInfo();
-        setDbInfo(info);
+        if (mountedRef.current) setDbInfo(info);
       } catch (refreshErr) {
-        setDbInfo(null);
-        setError(`恢复已成功，但统计刷新失败: ${String(refreshErr)}`);
+        if (mountedRef.current) {
+          setDbInfo(null);
+          setError(`恢复已成功，但统计刷新失败: ${String(refreshErr)}`);
+        }
       }
     } catch (err) {
-      setError(String(err));
+      if (mountedRef.current) setError(String(err));
     } finally {
-      setBackupInfo(null);
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
 
@@ -415,8 +470,12 @@ export default function DataManagement() {
           </div>
         ) : (
           <div className="dm-section-actions">
-            <button className="btn btn-secondary" onClick={handleRestoreSelect} disabled={busy}>
-              选择备份文件...
+            <button
+              className="btn btn-secondary"
+              onClick={handleRestoreSelect}
+              disabled={busy || !restoreReady}
+            >
+              {restoreReady ? '选择备份文件...' : '正在清理恢复预览...'}
             </button>
           </div>
         )}

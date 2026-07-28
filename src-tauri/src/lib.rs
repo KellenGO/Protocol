@@ -3676,6 +3676,35 @@ fn discard_restore_preview_inner(database: &Database, preview_path: &Path) -> Re
     remove_registered_restore_preview(&preview_path)
 }
 
+fn discard_pending_restore_previews_inner(database: &Database) -> Result<(), String> {
+    let restore_dir = canonical_restore_directory(database)?;
+    let pending = {
+        let mut registry = restore_preview_registry()?;
+        let mut pending = Vec::new();
+        registry.retain(|path, preview| {
+            if path.parent() != Some(restore_dir.as_path()) {
+                return true;
+            }
+            drop(preview.source.take());
+            pending.push((path.clone(), preview.identity));
+            false
+        });
+        pending
+    };
+
+    let mut errors = Vec::new();
+    for (path, identity) in pending {
+        if let Err(error) = remove_preview_files_with_identity(&path, identity) {
+            errors.push(format!("{}: {error}", path.display()));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("部分待处理恢复预览无法清理: {}", errors.join("; ")))
+    }
+}
+
 fn backup_file_info(
     source_path: &Path,
     preview_path: &Path,
@@ -4002,6 +4031,11 @@ fn discard_restore_preview(
     preview_path: String,
 ) -> Result<(), String> {
     discard_restore_preview_inner(&state, Path::new(&preview_path))
+}
+
+#[tauri::command]
+fn discard_pending_restore_previews(state: tauri::State<'_, Database>) -> Result<(), String> {
+    discard_pending_restore_previews_inner(&state)
 }
 
 #[tauri::command]
@@ -4347,6 +4381,7 @@ pub fn run() {
             restore_database,
             inspect_backup_file,
             discard_restore_preview,
+            discard_pending_restore_previews,
             get_database_info,
             export_history_json,
             reset_history_and_progress,
