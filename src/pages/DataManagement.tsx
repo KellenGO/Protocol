@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -6,6 +6,8 @@ import {
   backupDatabase,
   restoreDatabase,
   inspectBackupFile,
+  discardRestorePreview,
+  discardPendingRestorePreviews,
   exportHistoryJson,
   resetHistoryAndProgress,
 } from '../lib/db';
@@ -33,6 +35,10 @@ export default function DataManagement() {
   // Restore flow
   const [backupInfo, setBackupInfo] = useState<BackupFileInfo | null>(null);
   const [restoreError, setRestoreError] = useState('');
+  const [restoreReady, setRestoreReady] = useState(false);
+  const activeRestorePreviewRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const pendingReclaimRef = useRef<Promise<void> | null>(null);
 
   // Reset flow
   const [resetStep, setResetStep] = useState(0); // 0=idle, 1=confirm, 2=input text
@@ -49,13 +55,38 @@ export default function DataManagement() {
     try {
       const info = await getDatabaseInfo();
       setDbInfo(info);
+      setError('');
     } catch (err) {
       setError(String(err));
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
+    let cancelled = false;
+    const pendingReclaim =
+      pendingReclaimRef.current ?? discardPendingRestorePreviews();
+    pendingReclaimRef.current = pendingReclaim;
+    pendingReclaim
+      .catch((err) => {
+        if (!cancelled) {
+          setRestoreError(`无法清理上次遗留的恢复预览: ${String(err)}`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRestoreReady(true);
+      });
     refreshInfo().finally(() => setLoading(false));
+
+    return () => {
+      cancelled = true;
+      mountedRef.current = false;
+      const previewPath = activeRestorePreviewRef.current;
+      activeRestorePreviewRef.current = null;
+      if (previewPath) {
+        void discardRestorePreview(previewPath).catch(() => {});
+      }
+    };
   }, []);
 
   const handleBackup = async () => {
@@ -89,15 +120,35 @@ export default function DataManagement() {
   // ---- Restore flow ----
 
   const handleRestoreSelect = async () => {
+    if (!restoreReady) return;
     clearMessages();
-    setBackupInfo(null);
+    if (backupInfo) {
+      const previewPath =
+        activeRestorePreviewRef.current ?? backupInfo.restore_preview_path;
+      activeRestorePreviewRef.current = null;
+      setBusy(true);
+      try {
+        await discardRestorePreview(previewPath);
+        if (!mountedRef.current) return;
+        setBackupInfo(null);
+      } catch (err) {
+        if (mountedRef.current) {
+          activeRestorePreviewRef.current = previewPath;
+          setRestoreError(`无法清理上一个恢复预览: ${String(err)}`);
+        }
+        if (mountedRef.current) setBusy(false);
+        return;
+      }
+      if (!mountedRef.current) return;
+      setBusy(false);
+    }
 
     const selected = await open({
       multiple: false,
       filters: [{ name: 'SQLite 数据库', extensions: ['sqlite', 'db'] }],
     });
 
-    if (!selected) return;
+    if (!selected || !mountedRef.current) return;
 
     const filePath = selected;
 
@@ -105,30 +156,64 @@ export default function DataManagement() {
     setBusy(true);
     try {
       const info = await inspectBackupFile(filePath);
+      if (!mountedRef.current) {
+        void discardRestorePreview(info.restore_preview_path).catch(() => {});
+        return;
+      }
+      activeRestorePreviewRef.current = info.restore_preview_path;
       setBackupInfo(info);
     } catch (err) {
-      setRestoreError(String(err));
+      if (mountedRef.current) setRestoreError(String(err));
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
 
-  const handleRestoreCancel = () => {
-    setBackupInfo(null);
+  const handleRestoreCancel = async () => {
+    if (!backupInfo) return;
+    const previewPath =
+      activeRestorePreviewRef.current ?? backupInfo.restore_preview_path;
+    activeRestorePreviewRef.current = null;
+    clearMessages();
+    setBusy(true);
+    try {
+      await discardRestorePreview(previewPath);
+      if (mountedRef.current) setBackupInfo(null);
+    } catch (err) {
+      if (mountedRef.current) {
+        activeRestorePreviewRef.current = previewPath;
+        setRestoreError(`无法清理恢复预览，请重试: ${String(err)}`);
+      }
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
   };
 
   const handleRestoreConfirm = async () => {
     if (!backupInfo) return;
+    const previewPath =
+      activeRestorePreviewRef.current ?? backupInfo.restore_preview_path;
+    activeRestorePreviewRef.current = null;
+    setBackupInfo(null);
     clearMessages();
     setBusy(true);
     try {
-      const result = await restoreDatabase(backupInfo.path);
+      const result = await restoreDatabase(previewPath);
+      if (!mountedRef.current) return;
       setSuccess(result);
-      setBackupInfo(null);
+      try {
+        const info = await getDatabaseInfo();
+        if (mountedRef.current) setDbInfo(info);
+      } catch (refreshErr) {
+        if (mountedRef.current) {
+          setDbInfo(null);
+          setError(`恢复已成功，但统计刷新失败: ${String(refreshErr)}`);
+        }
+      }
     } catch (err) {
-      setError(String(err));
+      if (mountedRef.current) setError(String(err));
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
 
@@ -254,9 +339,9 @@ export default function DataManagement() {
         </div>
       </div>
 
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
       {success && (
-        <p className="dm-success">
+        <p className="dm-success" role="status" aria-live="polite">
           {success}
         </p>
       )}
@@ -264,7 +349,7 @@ export default function DataManagement() {
       {/* ===== Database Info ===== */}
       <section className="dm-section">
         <h3>数据库信息</h3>
-        {dbInfo && (
+        {dbInfo ? (
           <div className="dm-info-layout">
             <div className="dm-path-panel">
               <span className="dm-info-label">数据库路径</span>
@@ -297,6 +382,17 @@ export default function DataManagement() {
               </button>
             </div>
           </div>
+        ) : (
+          <div className="dm-info-layout">
+            <p className="dm-desc">
+              数据库统计暂时不可用。数据库仍可继续使用；请重试加载以确认当前文件和记录数量。
+            </p>
+            <div className="dm-section-actions">
+              <button className="btn btn-secondary" onClick={refreshInfo} disabled={busy}>
+                重试加载数据库统计
+              </button>
+            </div>
+          </div>
         )}
       </section>
 
@@ -317,15 +413,15 @@ export default function DataManagement() {
       <section className="dm-section">
         <h3>从备份恢复</h3>
         <p className="dm-desc">
-          选择一个 Protocol 备份文件（.sqlite）来替换当前数据。
-          恢复前会自动创建当前数据的安全备份，存放在数据库目录的 <code>.backup/</code> 子目录下。
+          恢复会替换当前所有本地数据，包括链进度、设置，以及备份中仍在进行或已经逾期的会话。恢复前会自动创建并验证当前数据库的安全快照；恢复成功后立即生效，无需重启 Protocol。
+          请选择由 Protocol“备份当前数据”生成的自包含 SQLite 文件；正在使用的 protocol.db 或 WAL sidecar 组合不会被当作备份恢复。
         </p>
         <p className="dm-warn">
           恢复会替换当前所有本地数据。请确认已备份当前数据库。
         </p>
 
         {restoreError && (
-          <p className="form-error">{restoreError}</p>
+          <p className="form-error" role="alert">{restoreError}</p>
         )}
 
         {/* Backup file info — after inspection */}
@@ -335,7 +431,7 @@ export default function DataManagement() {
             <div className="dm-backup-info-grid">
               <div className="dm-backup-info-item">
                 <span>文件路径</span>
-                <code className="code-path">{backupInfo.path}</code>
+                <code className="code-path">{backupInfo.source_path}</code>
               </div>
               <div className="dm-backup-info-item">
                 <span>文件大小</span>
@@ -354,12 +450,18 @@ export default function DataManagement() {
               {renderTableCount('定式', backupInfo.tables.rsip_formulas)}
               {renderTableCount('定式事件', backupInfo.tables.formula_events)}
             </div>
+            <p className="dm-confirm-detail">
+              以上信息来自应用创建的一次性恢复预览。确认恢复只会读取该预览；取消、重新选择或恢复完成后会清理预览，所选原文件不会被修改。
+            </p>
             <p className="dm-confirm-warn">
-              此操作不可撤销！当前数据将被完全替换。恢复后请重启 Protocol 以加载新数据。
+              当前数据将被完整替换。确认后应用会立即切换到备份数据。
             </p>
             <div className="dm-confirm-actions">
               <button className="btn btn-secondary" onClick={handleRestoreCancel} disabled={busy}>
                 取消
+              </button>
+              <button className="btn btn-secondary" onClick={handleRestoreSelect} disabled={busy}>
+                重新选择
               </button>
               <button className="btn btn-danger" onClick={handleRestoreConfirm} disabled={busy}>
                 {busy ? '恢复中...' : '确认恢复'}
@@ -368,8 +470,12 @@ export default function DataManagement() {
           </div>
         ) : (
           <div className="dm-section-actions">
-            <button className="btn btn-secondary" onClick={handleRestoreSelect} disabled={busy}>
-              选择备份文件...
+            <button
+              className="btn btn-secondary"
+              onClick={handleRestoreSelect}
+              disabled={busy || !restoreReady}
+            >
+              {restoreReady ? '选择备份文件...' : '正在清理恢复预览...'}
             </button>
           </div>
         )}
