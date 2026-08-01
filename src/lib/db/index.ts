@@ -350,6 +350,27 @@ export async function getFormulaEvents(limit = 20): Promise<FormulaEvent[]> {
   return invoke('get_formula_events', { limit });
 }
 
+export interface MoveRsipFormulaResult {
+  formula: RsipFormula;
+  old_parent_id: number | null;
+  new_parent_id: number | null;
+  deactivated_ids: number[];
+}
+
+export async function moveRsipFormula(params: {
+  id: number;
+  newParentId: number | null;
+  newPosition?: number | null;
+  allowStatusRollback?: boolean;
+}): Promise<MoveRsipFormulaResult> {
+  return invoke('move_rsip_formula', {
+    id: params.id,
+    newParentId: params.newParentId,
+    newPosition: params.newPosition ?? null,
+    allowStatusRollback: params.allowStatusRollback ?? false,
+  });
+}
+
 export async function getRsipSummary(): Promise<RsipSummary> {
   return invoke('get_rsip_summary');
 }

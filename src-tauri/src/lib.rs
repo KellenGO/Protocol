@@ -2280,6 +2280,259 @@ fn deactivate_rsip_formula(
     Ok(formulas)
 }
 
+#[derive(Debug)]
+struct MoveSourceInfo {
+    old_parent_id: Option<i64>,
+    old_position: i64,
+    title: String,
+}
+
+fn load_move_source(conn: &rusqlite::Connection, id: i64) -> Result<MoveSourceInfo, String> {
+    conn.query_row(
+        "SELECT parent_id, position, title FROM rsip_formulas WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(MoveSourceInfo {
+                old_parent_id: row.get(0)?,
+                old_position: row.get(1)?,
+                title: row.get(2)?,
+            })
+        },
+    )
+    .map_err(|_| "定式不存在".to_string())
+}
+
+fn normalize_formula_title(title: &str) -> String {
+    title.trim().to_lowercase()
+}
+
+fn has_duplicate_sibling(
+    conn: &rusqlite::Connection,
+    id: i64,
+    new_parent_id: Option<i64>,
+    title: &str,
+) -> Result<bool, String> {
+    let normalized = normalize_formula_title(title);
+    let count: i64 = match new_parent_id {
+        Some(pid) => conn.query_row(
+            "SELECT COUNT(*) FROM rsip_formulas
+             WHERE id != ?1 AND parent_id IS ?2 AND LOWER(TRIM(title)) = ?3",
+            rusqlite::params![id, pid, normalized],
+            |row| row.get(0),
+        ),
+        None => conn.query_row(
+            "SELECT COUNT(*) FROM rsip_formulas
+             WHERE id != ?1 AND parent_id IS NULL AND LOWER(TRIM(title)) = ?2",
+            rusqlite::params![id, normalized],
+            |row| row.get(0),
+        ),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+
+fn resolve_move_position(
+    tx: &rusqlite::Transaction<'_>,
+    id: i64,
+    new_parent_id: Option<i64>,
+    new_position: Option<i64>,
+) -> Result<i64, String> {
+    let sibling_count: i64 = match new_parent_id {
+        Some(pid) => tx.query_row(
+            "SELECT COUNT(*) FROM rsip_formulas WHERE parent_id = ?1 AND id != ?2",
+            rusqlite::params![pid, id],
+            |row| row.get(0),
+        ),
+        None => tx.query_row(
+            "SELECT COUNT(*) FROM rsip_formulas WHERE parent_id IS NULL AND id != ?1",
+            [id],
+            |row| row.get(0),
+        ),
+    }
+    .map_err(|e| e.to_string())?;
+
+    Ok(match new_position {
+        Some(requested) => requested.clamp(0, sibling_count),
+        None => sibling_count,
+    })
+}
+
+fn move_rsip_formula_core(
+    conn: &mut rusqlite::Connection,
+    id: i64,
+    new_parent_id: Option<i64>,
+    new_position: Option<i64>,
+    allow_status_rollback: bool,
+) -> Result<serde_json::Value, String> {
+    let source = load_move_source(conn, id)?;
+
+    if let Some(pid) = new_parent_id {
+        if pid == id {
+            return Err("不能把节点移动到自身下".into());
+        }
+        let parent_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM rsip_formulas WHERE id = ?1",
+                [pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !parent_exists {
+            return Err("目标父定式不存在".into());
+        }
+        let parent_is_descendant: bool = conn
+            .query_row(
+                "WITH RECURSIVE descendants(id) AS (
+                    SELECT id FROM rsip_formulas WHERE parent_id = ?1
+                    UNION ALL
+                    SELECT f.id FROM rsip_formulas f JOIN descendants d ON f.parent_id = d.id
+                 )
+                 SELECT EXISTS(SELECT 1 FROM descendants WHERE id = ?2)",
+                rusqlite::params![id, pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if parent_is_descendant {
+            return Err("不能把节点移动到自己的子孙节点下".into());
+        }
+    }
+
+    if has_duplicate_sibling(conn, id, new_parent_id, &source.title)? {
+        return Err("目标层级下已存在同名节点".into());
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let position = resolve_move_position(&tx, id, new_parent_id, new_position)?;
+
+    // 从旧兄弟列表中移除并压缩 position
+    match source.old_parent_id {
+        Some(pid) => tx.execute(
+            "UPDATE rsip_formulas
+             SET position = position - 1, updated_at = datetime('now')
+             WHERE parent_id = ?1 AND id != ?2 AND position > ?3",
+            rusqlite::params![pid, id, source.old_position],
+        ),
+        None => tx.execute(
+            "UPDATE rsip_formulas
+             SET position = position - 1, updated_at = datetime('now')
+             WHERE parent_id IS NULL AND id != ?1 AND position > ?2",
+            rusqlite::params![id, source.old_position],
+        ),
+    }
+    .map_err(|e| e.to_string())?;
+
+    // 在新兄弟列表中插入位置并让位
+    match new_parent_id {
+        Some(pid) => tx.execute(
+            "UPDATE rsip_formulas
+             SET position = position + 1, updated_at = datetime('now')
+             WHERE parent_id = ?1 AND id != ?2 AND position >= ?3",
+            rusqlite::params![pid, id, position],
+        ),
+        None => tx.execute(
+            "UPDATE rsip_formulas
+             SET position = position + 1, updated_at = datetime('now')
+             WHERE parent_id IS NULL AND id != ?1 AND position >= ?2",
+            rusqlite::params![id, position],
+        ),
+    }
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "UPDATE rsip_formulas
+         SET parent_id = ?2,
+             position = ?3,
+             dependency_note = NULL,
+             updated_at = datetime('now')
+         WHERE id = ?1",
+        rusqlite::params![id, new_parent_id, position],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut deactivated_ids: Vec<i64> = Vec::new();
+    if let Some(pid) = new_parent_id {
+        let parent_status: String = tx
+            .query_row("SELECT status FROM rsip_formulas WHERE id = ?1", [pid], |row| {
+                row.get(0)
+            })
+            .map_err(|e| e.to_string())?;
+        if parent_status == "inactive" {
+            let active_in_subtree: Vec<i64> = {
+                let mut stmt = tx
+                    .prepare(
+                        "WITH RECURSIVE descendants(id) AS (
+                            SELECT id FROM rsip_formulas WHERE parent_id = ?1
+                            UNION ALL
+                            SELECT f.id FROM rsip_formulas f JOIN descendants d ON f.parent_id = d.id
+                         )
+                         SELECT id FROM rsip_formulas
+                         WHERE id IN (SELECT id FROM descendants UNION ALL SELECT ?1)
+                           AND status = 'active'
+                         ORDER BY id",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([id], |row| row.get::<_, i64>(0))
+                    .map_err(|e| e.to_string())?;
+                let mut ids = Vec::new();
+                for row in rows {
+                    ids.push(row.map_err(|e| e.to_string())?);
+                }
+                ids
+            };
+            if !active_in_subtree.is_empty() {
+                if !allow_status_rollback {
+                    return Err("目标父定式尚未点亮，移动将熄灭该节点及其已点亮子节点".into());
+                }
+                for child_id in &active_in_subtree {
+                    tx.execute(
+                        "UPDATE rsip_formulas
+                         SET status = 'inactive',
+                             deactivated_at = datetime('now'),
+                             updated_at = datetime('now')
+                         WHERE id = ?1",
+                        [child_id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    tx.execute(
+                        "INSERT INTO formula_events (formula_id, event_type, note)
+                         VALUES (?1, 'rollback_child_deactivated', ?2)",
+                        rusqlite::params![
+                            child_id,
+                            format!("移动至未点亮父定式 {}，触发递归熄灭", pid)
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                deactivated_ids = active_in_subtree;
+            }
+        }
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let formula = get_rsip_formula_json(conn, id)?;
+    Ok(serde_json::json!({
+        "formula": formula,
+        "old_parent_id": source.old_parent_id,
+        "new_parent_id": new_parent_id,
+        "deactivated_ids": deactivated_ids,
+    }))
+}
+
+#[tauri::command]
+fn move_rsip_formula(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    new_parent_id: Option<i64>,
+    new_position: Option<i64>,
+    allow_status_rollback: bool,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    move_rsip_formula_core(&mut conn, id, new_parent_id, new_position, allow_status_rollback)
+}
+
 #[tauri::command]
 fn get_formula_events(
     state: tauri::State<'_, Database>,
@@ -3319,6 +3572,7 @@ pub fn run() {
             update_rsip_formula,
             activate_rsip_formula,
             deactivate_rsip_formula,
+            move_rsip_formula,
             get_formula_events,
             get_rsip_formula_review,
             get_rsip_summary,
@@ -3687,6 +3941,223 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    fn move_formula_test_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE rsip_formulas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parent_id INTEGER,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'inactive',
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                activated_at TEXT,
+                deactivated_at TEXT,
+                goal_id INTEGER,
+                failure_path_id INTEGER,
+                intervention_node_id TEXT,
+                dependency_note TEXT
+            );
+
+            CREATE TABLE formula_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                formula_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            INSERT INTO rsip_formulas (id, parent_id, title, position, status) VALUES
+                (2, NULL, 'Two', 0, 'active'),
+                (7, NULL, 'Seven', 1, 'active'),
+                (8, 7, 'Eight', 0, 'inactive'),
+                (9, 8, 'Nine', 0, 'inactive'),
+                (11, NULL, 'Eleven', 2, 'active');
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn snapshot_tree(conn: &rusqlite::Connection) -> Vec<(i64, Option<i64>, i64, String)> {
+        let mut stmt = conn
+            .prepare("SELECT id, parent_id, position, status FROM rsip_formulas ORDER BY id")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .unwrap();
+        rows.map(|row| row.unwrap()).collect()
+    }
+
+    fn formula_json_fields(value: &serde_json::Value) -> (Option<i64>, Option<i64>, i64) {
+        (
+            value["formula"]["parent_id"].as_i64(),
+            value["old_parent_id"].as_i64(),
+            value["formula"]["position"].as_i64().unwrap(),
+        )
+    }
+
+    #[test]
+    fn move_rsip_formula_root_under_another_root() {
+        let mut conn = move_formula_test_conn();
+        let result = move_rsip_formula_core(&mut conn, 11, Some(7), None, false).unwrap();
+        let (parent, old_parent, position) = formula_json_fields(&result);
+        assert_eq!(parent, Some(7));
+        assert_eq!(old_parent, None);
+        assert_eq!(position, 1);
+    }
+
+    #[test]
+    fn move_rsip_formula_promotes_child_to_root() {
+        let mut conn = move_formula_test_conn();
+        let result = move_rsip_formula_core(&mut conn, 8, None, None, false).unwrap();
+        let (parent, old_parent, position) = formula_json_fields(&result);
+        assert_eq!(parent, None);
+        assert_eq!(old_parent, Some(7));
+        assert_eq!(position, 3);
+    }
+
+    #[test]
+    fn move_rsip_formula_rejects_self() {
+        let mut conn = move_formula_test_conn();
+        let err = move_rsip_formula_core(&mut conn, 7, Some(7), None, false).unwrap_err();
+        assert!(err.contains("自身"), "got: {err}");
+    }
+
+    #[test]
+    fn move_rsip_formula_rejects_descendants() {
+        let mut conn = move_formula_test_conn();
+        let err = move_rsip_formula_core(&mut conn, 7, Some(8), None, false).unwrap_err();
+        assert!(err.contains("子孙"), "got: {err}");
+        let err = move_rsip_formula_core(&mut conn, 7, Some(9), None, false).unwrap_err();
+        assert!(err.contains("子孙"), "got: {err}");
+    }
+
+    #[test]
+    fn move_rsip_formula_rejects_missing_target() {
+        let mut conn = move_formula_test_conn();
+        let err = move_rsip_formula_core(&mut conn, 7, Some(999), None, false).unwrap_err();
+        assert!(err.contains("不存在"), "got: {err}");
+    }
+
+    #[test]
+    fn move_rsip_formula_keeps_sibling_positions_contiguous() {
+        let mut conn = move_formula_test_conn();
+        move_rsip_formula_core(&mut conn, 11, Some(7), None, false).unwrap();
+
+        let root_positions: Vec<i64> = {
+            let mut stmt = conn
+                .prepare("SELECT position FROM rsip_formulas WHERE parent_id IS NULL ORDER BY position")
+                .unwrap();
+            let rows = stmt
+                .query_map([], |row| row.get::<_, i64>(0))
+                .unwrap();
+            rows.map(|row| row.unwrap()).collect()
+        };
+        assert_eq!(root_positions, vec![0, 1]);
+
+        let child_positions: Vec<i64> = {
+            let mut stmt = conn
+                .prepare("SELECT position FROM rsip_formulas WHERE parent_id = 7 ORDER BY position")
+                .unwrap();
+            let rows = stmt
+                .query_map([], |row| row.get::<_, i64>(0))
+                .unwrap();
+            rows.map(|row| row.unwrap()).collect()
+        };
+        assert_eq!(child_positions, vec![0, 1]);
+    }
+
+    #[test]
+    fn move_rsip_formula_to_inactive_parent_requires_rollback_confirm() {
+        let mut conn = move_formula_test_conn();
+        // 11 已点亮，8 未点亮：未确认则拒绝
+        let err = move_rsip_formula_core(&mut conn, 11, Some(8), None, false).unwrap_err();
+        assert!(err.contains("尚未点亮"), "got: {err}");
+        // 确认后移动并递归熄灭
+        let result = move_rsip_formula_core(&mut conn, 11, Some(8), None, true).unwrap();
+        assert_eq!(result["deactivated_ids"], serde_json::json!([11]));
+        assert_eq!(result["formula"]["status"].as_str(), Some("inactive"));
+    }
+
+    #[test]
+    fn move_rsip_formula_to_active_parent_keeps_status() {
+        let mut conn = move_formula_test_conn();
+        let result = move_rsip_formula_core(&mut conn, 2, Some(7), None, false).unwrap();
+        assert_eq!(result["formula"]["status"].as_str(), Some("active"));
+        assert_eq!(result["deactivated_ids"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn move_rsip_formula_failure_leaves_no_partial_changes() {
+        let mut conn = move_formula_test_conn();
+        let before = snapshot_tree(&conn);
+        // 三类失败：子孙、自身、目标不存在
+        assert!(move_rsip_formula_core(&mut conn, 7, Some(8), None, false).is_err());
+        assert!(move_rsip_formula_core(&mut conn, 7, Some(7), None, false).is_err());
+        assert!(move_rsip_formula_core(&mut conn, 7, Some(999), None, false).is_err());
+        assert!(move_rsip_formula_core(&mut conn, 7, Some(7), Some(0), false).is_err());
+        let after = snapshot_tree(&conn);
+        assert_eq!(before, after, "failed moves must not mutate the tree");
+    }
+
+    #[test]
+    fn move_rsip_formula_persists_after_reopen() {
+        let dir = std::env::temp_dir().join(format!("protocol_move_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("move_test.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE rsip_formulas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    parent_id INTEGER,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'inactive',
+                    position INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    activated_at TEXT,
+                    deactivated_at TEXT,
+                    goal_id INTEGER,
+                    failure_path_id INTEGER,
+                    intervention_node_id TEXT,
+                    dependency_note TEXT
+                );
+                INSERT INTO rsip_formulas (id, parent_id, title, position) VALUES
+                    (2, NULL, 'Two', 0),
+                    (7, NULL, 'Seven', 1),
+                    (8, 7, 'Eight', 0),
+                    (11, NULL, 'Eleven', 2);",
+            )
+            .unwrap();
+            move_rsip_formula_core(&mut conn, 11, Some(7), None, false).unwrap();
+        }
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            let parent: Option<i64> = conn
+                .query_row("SELECT parent_id FROM rsip_formulas WHERE id = 11", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(parent, Some(7));
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn reservation_guard_test_conn(
