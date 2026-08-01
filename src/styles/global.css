@@ -4602,3 +4602,30 @@ textarea,
     grid-template-columns: 1fr;
   }
 }
+
+/* Policies tabs */
+.policies-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 0;
+}
+
+.policies-tab {
+  padding: 10px 20px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.policies-tab:hover {
+  color: var(--text-primary);
+}
+
+.policies-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--gold);
+}

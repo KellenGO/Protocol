@@ -8,8 +8,10 @@ import DataManagement from './pages/DataManagement';
 import AuxiliarySessionPage from './pages/AuxiliarySession';
 import FocusSessionPage from './pages/FocusSession';
 import History from './pages/History';
-import RSIP from './pages/RSIP';
-import RSIPReview from './pages/RSIPReview';
+import Policies from './pages/Policies';
+import PoliciesTree from './pages/PoliciesTree';
+import PoliciesLibrary from './pages/PoliciesLibrary';
+import PoliciesReview from './pages/PoliciesReview';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -27,8 +29,12 @@ export default function App() {
             <Route path="/chains/:id/focus" element={<FocusSessionPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/review" element={<Navigate to="/?view=chains" replace />} />
-            <Route path="/rsip-review" element={<RSIPReview />} />
-            <Route path="/rsip" element={<RSIP />} />
+            <Route path="/policies" element={<Policies />}>
+              <Route index element={<Navigate to="tree" replace />} />
+              <Route path="tree" element={<PoliciesTree />} />
+              <Route path="library" element={<PoliciesLibrary />} />
+              <Route path="review" element={<PoliciesReview />} />
+            </Route>
             <Route path="/settings" element={<Settings />} />
             <Route path="/data-management" element={<DataManagement />} />
           </Routes>
