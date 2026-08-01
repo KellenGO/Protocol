@@ -145,6 +145,45 @@ pub(crate) fn initialize_schema_on(conn: &Connection) -> SqliteResult<()> {
                 FOREIGN KEY (formula_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS policies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS policy_tree_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                policy_id INTEGER NOT NULL,
+                parent_node_id INTEGER,
+                sibling_order INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'lit' CHECK(status IN ('lit', 'extinguished')),
+                added_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE,
+                FOREIGN KEY (parent_node_id) REFERENCES policy_tree_nodes(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS policy_cycles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                policy_id INTEGER NOT NULL,
+                tree_node_id INTEGER NOT NULL,
+                started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                ended_at TEXT,
+                end_reason TEXT,
+                FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS policy_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                policy_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL CHECK(event_type IN ('added_to_tree', 'removed_from_tree', 'lit', 'extinguished', 'reparented', 'reordered', 'renamed')),
+                reason TEXT NOT NULL DEFAULT '',
+                metadata TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+            );
+
             INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_focus_duration', '25');
             INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_reservation_duration', '15');
             INSERT OR IGNORE INTO app_settings (key, value) VALUES ('auxiliary_confirmation_window_minutes', '3');
@@ -156,6 +195,7 @@ pub(crate) fn initialize_schema_on(conn: &Connection) -> SqliteResult<()> {
     migrate_protocol_config_schema(conn)?;
     migrate_rsip_goal_translation_schema(conn)?;
     migrate_formula_events_reparented(conn)?;
+    migrate_v0_5_to_policy_system(conn)?;
 
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -304,6 +344,133 @@ fn migrate_formula_events_reparented(conn: &Connection) -> SqliteResult<()> {
         COMMIT;
         PRAGMA foreign_keys=ON;
         ",
+    )?;
+
+    Ok(())
+}
+
+const POLICY_TABLES_DDL: &str = "
+    CREATE TABLE IF NOT EXISTS policies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS policy_tree_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        policy_id INTEGER NOT NULL,
+        parent_node_id INTEGER,
+        sibling_order INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'lit' CHECK(status IN ('lit', 'extinguished')),
+        added_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_node_id) REFERENCES policy_tree_nodes(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS policy_cycles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        policy_id INTEGER NOT NULL,
+        tree_node_id INTEGER NOT NULL,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ended_at TEXT,
+        end_reason TEXT,
+        FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS policy_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        policy_id INTEGER NOT NULL,
+        event_type TEXT NOT NULL CHECK(event_type IN ('added_to_tree', 'removed_from_tree', 'lit', 'extinguished', 'reparented', 'reordered', 'renamed')),
+        reason TEXT NOT NULL DEFAULT '',
+        metadata TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+    );
+";
+
+/// 将旧 RSIP 单表模型（rsip_formulas + formula_events）迁移到新的
+/// 四表国策模型（policies / policy_tree_nodes / policy_cycles / policy_events）。
+///
+/// - 旧表保留不改名，用户可能有备份依赖。
+/// - 以 app_settings.policy_system_migrated 标记保证幂等。
+fn migrate_v0_5_to_policy_system(conn: &Connection) -> SqliteResult<()> {
+    // 1. 创建四个新表（如果不存在，防御性）。
+    conn.execute_batch(POLICY_TABLES_DDL)?;
+
+    // 2. 防御性补列：rsip_formulas 可能缺失的新字段（已有迁移已处理）。
+    add_column_if_missing(conn, "rsip_formulas", "goal_id", "INTEGER")?;
+    add_column_if_missing(conn, "rsip_formulas", "failure_path_id", "INTEGER")?;
+    add_column_if_missing(conn, "rsip_formulas", "intervention_node_id", "TEXT")?;
+    add_column_if_missing(conn, "rsip_formulas", "dependency_note", "TEXT")?;
+
+    // 幂等标记：已迁移则直接返回。
+    let already_migrated: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_settings WHERE key = 'policy_system_migrated')",
+        [],
+        |row| row.get(0),
+    )?;
+    if already_migrated {
+        return Ok(());
+    }
+
+    // 3. 数据迁移仅在 policies 为空时执行（防止标记丢失后重复导入）。
+    let policy_count: i64 = conn.query_row("SELECT COUNT(*) FROM policies", [], |row| row.get(0))?;
+    if policy_count == 0 {
+        let tx = conn.unchecked_transaction()?;
+
+        // rsip_formulas → policies（title→name, description→description）
+        tx.execute_batch(
+            "
+            INSERT INTO policies (id, name, description, created_at, updated_at)
+            SELECT id, title, description, created_at, COALESCE(updated_at, created_at)
+            FROM rsip_formulas;
+
+            -- rsip_formulas → policy_tree_nodes
+            -- (id, policy_id 均沿用原 formula id；parent_id 直接转换为 parent_node_id；
+            --  status active→lit / inactive→extinguished；position→sibling_order)
+            INSERT INTO policy_tree_nodes (
+                id, policy_id, parent_node_id, sibling_order, status, added_at
+            )
+            SELECT
+                id,
+                id,
+                parent_id,
+                position,
+                CASE WHEN status = 'active' THEN 'lit' ELSE 'extinguished' END,
+                COALESCE(activated_at, created_at)
+            FROM rsip_formulas;
+            ",
+        )?;
+
+        // 4. formula_events → policy_events（rollback_child_deactivated 跳过，新模型无级联）
+        tx.execute_batch(
+            "
+            INSERT INTO policy_events (policy_id, event_type, reason, metadata, created_at)
+            SELECT
+                formula_id,
+                CASE event_type
+                    WHEN 'created' THEN 'added_to_tree'
+                    WHEN 'activated' THEN 'lit'
+                    WHEN 'deactivated' THEN 'extinguished'
+                    WHEN 'reparented' THEN 'reparented'
+                END,
+                note,
+                '',
+                created_at
+            FROM formula_events
+            WHERE event_type IN ('created', 'activated', 'deactivated', 'reparented');
+            ",
+        )?;
+
+        tx.commit()?;
+    }
+
+    // 5. 写入迁移完成标记（无论是否实际导入了数据，均避免重复扫描）。
+    conn.execute(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('policy_system_migrated', '1')",
+        [],
     )?;
 
     Ok(())

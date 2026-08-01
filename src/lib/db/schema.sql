@@ -120,6 +120,47 @@ CREATE TABLE IF NOT EXISTS formula_events (
     FOREIGN KEY (formula_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
 );
 
+-- ===== Policy System (国策) =====
+
+CREATE TABLE IF NOT EXISTS policies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS policy_tree_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    policy_id INTEGER NOT NULL,
+    parent_node_id INTEGER,
+    sibling_order INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'lit' CHECK(status IN ('lit', 'extinguished')),
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_node_id) REFERENCES policy_tree_nodes(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS policy_cycles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    policy_id INTEGER NOT NULL,
+    tree_node_id INTEGER NOT NULL,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT,
+    end_reason TEXT,
+    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS policy_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    policy_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL CHECK(event_type IN ('added_to_tree', 'removed_from_tree', 'lit', 'extinguished', 'reparented', 'reordered', 'renamed')),
+    reason TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE
+);
+
 -- Default settings
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_focus_duration', '25');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_reservation_duration', '15');

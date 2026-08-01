@@ -359,6 +359,60 @@ export interface FailureDebugSummary {
   chain_names: string[];
 }
 
+// ===== Policy System (国策) =====
+
+export interface Policy {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyTreeNode {
+  id: number;
+  policy_id: number;
+  parent_node_id: number | null;
+  sibling_order: number;
+  status: 'lit' | 'extinguished';
+  added_at: string;
+}
+
+export interface PolicyCycle {
+  id: number;
+  policy_id: number;
+  tree_node_id: number;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string | null;
+}
+
+export interface PolicyEvent {
+  id: number;
+  policy_id: number;
+  event_type:
+    | 'added_to_tree'
+    | 'removed_from_tree'
+    | 'lit'
+    | 'extinguished'
+    | 'reparented'
+    | 'reordered'
+    | 'renamed';
+  reason: string;
+  metadata: string;
+  created_at: string;
+}
+
+export interface TreeNodeWithPolicy extends PolicyTreeNode {
+  policy_name: string;
+  policy_description: string;
+}
+
+export interface PolicyWithTreeStatus extends Policy {
+  in_tree: boolean;
+  tree_status: 'lit' | 'extinguished' | null;
+}
+
 /** 判例复盘：判例 + 关联链名 */
 export interface PrecedentReviewItem {
   id: number;

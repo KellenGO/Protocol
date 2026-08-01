@@ -18,6 +18,11 @@ use tauri::Manager;
 const PENDING_RULING_NOTE: &str = "__pending_ruling__";
 const CHAIN_FIELDS: &str = "id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at";
 const RSIP_FORMULA_FIELDS: &str = "id, parent_id, title, description, status, position, created_at, updated_at, activated_at, deactivated_at, goal_id, failure_path_id, intervention_node_id, dependency_note";
+const POLICY_FIELDS: &str = "id, name, description, created_at, updated_at";
+const POLICY_TREE_NODE_FIELDS: &str = "id, policy_id, parent_node_id, sibling_order, status, added_at";
+const POLICY_CYCLE_FIELDS: &str = "id, policy_id, tree_node_id, started_at, ended_at, end_reason";
+const POLICY_EVENT_FIELDS: &str = "id, policy_id, event_type, reason, metadata, created_at";
+const POLICY_TREE_NODE_WITH_POLICY_FIELDS: &str = "t.id, t.policy_id, t.parent_node_id, t.sibling_order, t.status, t.added_at, p.name, p.description";
 const CURRENT_SCHEMA_PROBES: &[(&str, &str)] = &[
     ("chains", "SELECT id, name, description, trigger_action, completion_condition, focus_duration_minutes, auxiliary_trigger_action, auxiliary_delay_minutes, auxiliary_completion_condition, auxiliary_current_length, auxiliary_best_length, current_length, best_length, status, created_at, updated_at FROM chains LIMIT 0"),
     ("focus_sessions", "SELECT id, chain_id, started_at, expected_end_at, ended_at, duration_minutes, result, failure_note, trigger_action, completion_condition, debug_category, debug_note, created_at FROM focus_sessions LIMIT 0"),
@@ -283,6 +288,64 @@ fn formula_event_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::V
         "formula_title": row.get::<_, String>(2)?,
         "event_type": row.get::<_, String>(3)?,
         "note": row.get::<_, String>(4)?,
+        "created_at": row.get::<_, String>(5)?,
+    }))
+}
+
+fn policy_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "name": row.get::<_, String>(1)?,
+        "description": row.get::<_, String>(2)?,
+        "created_at": row.get::<_, String>(3)?,
+        "updated_at": row.get::<_, String>(4)?,
+    }))
+}
+
+fn policy_tree_node_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "policy_id": row.get::<_, i64>(1)?,
+        "parent_node_id": row.get::<_, Option<i64>>(2)?,
+        "sibling_order": row.get::<_, i64>(3)?,
+        "status": row.get::<_, String>(4)?,
+        "added_at": row.get::<_, String>(5)?,
+    }))
+}
+
+fn policy_tree_node_with_policy_json(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "policy_id": row.get::<_, i64>(1)?,
+        "parent_node_id": row.get::<_, Option<i64>>(2)?,
+        "sibling_order": row.get::<_, i64>(3)?,
+        "status": row.get::<_, String>(4)?,
+        "added_at": row.get::<_, String>(5)?,
+        "policy_name": row.get::<_, String>(6)?,
+        "policy_description": row.get::<_, String>(7)?,
+    }))
+}
+
+fn policy_cycle_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "policy_id": row.get::<_, i64>(1)?,
+        "tree_node_id": row.get::<_, i64>(2)?,
+        "started_at": row.get::<_, String>(3)?,
+        "ended_at": row.get::<_, Option<String>>(4)?,
+        "end_reason": row.get::<_, Option<String>>(5)?,
+    }))
+}
+
+fn policy_event_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "policy_id": row.get::<_, i64>(1)?,
+        "event_type": row.get::<_, String>(2)?,
+        "reason": row.get::<_, String>(3)?,
+        "metadata": row.get::<_, String>(4)?,
         "created_at": row.get::<_, String>(5)?,
     }))
 }
@@ -4587,6 +4650,1163 @@ fn save_export_file(path: String, content: String) -> Result<String, String> {
     Ok(path)
 }
 
+// ===== Policy System (国策) Commands =====
+
+fn get_policy_json(conn: &rusqlite::Connection, id: i64) -> Result<serde_json::Value, String> {
+    conn.query_row(
+        &format!("SELECT {} FROM policies WHERE id = ?1", POLICY_FIELDS),
+        [id],
+        policy_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn get_tree_node_json(conn: &rusqlite::Connection, id: i64) -> Result<serde_json::Value, String> {
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM policy_tree_nodes WHERE id = ?1",
+            POLICY_TREE_NODE_FIELDS
+        ),
+        [id],
+        policy_tree_node_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn get_cycle_json(conn: &rusqlite::Connection, id: i64) -> Result<serde_json::Value, String> {
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM policy_cycles WHERE id = ?1",
+            POLICY_CYCLE_FIELDS
+        ),
+        [id],
+        policy_cycle_json,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn collect_subtree_node_ids(
+    conn: &rusqlite::Connection,
+    root_id: i64,
+) -> Result<Vec<i64>, String> {
+    let mut stmt = conn
+        .prepare(
+            "WITH RECURSIVE descendants(id) AS (
+                SELECT id FROM policy_tree_nodes WHERE id = ?1
+                UNION ALL
+                SELECT n.id FROM policy_tree_nodes n JOIN descendants d ON n.parent_node_id = d.id
+             )
+             SELECT id FROM descendants ORDER BY id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([root_id], |row| row.get::<_, i64>(0))
+        .map_err(|e| e.to_string())?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(ids)
+}
+
+fn node_name(conn: &rusqlite::Connection, node_id: i64) -> Option<String> {
+    conn.query_row(
+        "SELECT p.name FROM policy_tree_nodes t JOIN policies p ON p.id = t.policy_id WHERE t.id = ?1",
+        [node_id],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+#[derive(Debug)]
+struct TreeNodeSource {
+    old_parent_node_id: Option<i64>,
+    old_sibling_order: i64,
+    policy_id: i64,
+}
+
+fn load_tree_node_source(
+    conn: &rusqlite::Connection,
+    node_id: i64,
+) -> Result<TreeNodeSource, String> {
+    conn.query_row(
+        "SELECT parent_node_id, sibling_order, policy_id FROM policy_tree_nodes WHERE id = ?1",
+        [node_id],
+        |row| {
+            Ok(TreeNodeSource {
+                old_parent_node_id: row.get(0)?,
+                old_sibling_order: row.get(1)?,
+                policy_id: row.get(2)?,
+            })
+        },
+    )
+    .map_err(|_| "树节点不存在".to_string())
+}
+
+/// 解析目标 sibling_order：未指定时追加到末尾；指定时收敛到 [0, 兄弟数]。
+fn resolve_tree_sibling_order(
+    conn: &rusqlite::Connection,
+    parent_node_id: Option<i64>,
+    exclude_node_id: Option<i64>,
+    requested: Option<i64>,
+) -> Result<i64, String> {
+    let exclude = exclude_node_id.unwrap_or(-1);
+    let sibling_count: i64 = match parent_node_id {
+        Some(pid) => conn.query_row(
+            "SELECT COUNT(*) FROM policy_tree_nodes WHERE parent_node_id = ?1 AND id != ?2",
+            rusqlite::params![pid, exclude],
+            |row| row.get(0),
+        ),
+        None => conn.query_row(
+            "SELECT COUNT(*) FROM policy_tree_nodes WHERE parent_node_id IS NULL AND id != ?1",
+            [exclude],
+            |row| row.get(0),
+        ),
+    }
+    .map_err(|e| e.to_string())?;
+
+    Ok(match requested {
+        Some(order) => order.clamp(0, sibling_count),
+        None => sibling_count,
+    })
+}
+
+fn create_policy_core(
+    conn: &rusqlite::Connection,
+    name: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let name = clean_required(name, "国策名称不能为空")?;
+    conn.execute(
+        "INSERT INTO policies (name, description) VALUES (?1, ?2)",
+        rusqlite::params![name, description.trim()],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    get_policy_json(conn, id)
+}
+
+fn get_policies_core(conn: &rusqlite::Connection) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {} FROM policies ORDER BY created_at DESC, id DESC",
+            POLICY_FIELDS
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], policy_json).map_err(|e| e.to_string())?;
+    let mut policies = Vec::new();
+    for row in rows {
+        policies.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(policies)
+}
+
+fn update_policy_core(
+    conn: &rusqlite::Connection,
+    id: i64,
+    name: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let name = clean_required(name, "国策名称不能为空")?;
+    let old_name: String = conn
+        .query_row("SELECT name FROM policies WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .map_err(|_| "国策不存在".to_string())?;
+
+    let rows = conn
+        .execute(
+            "UPDATE policies SET name = ?2, description = ?3, updated_at = datetime('now') WHERE id = ?1",
+            rusqlite::params![id, name, description.trim()],
+        )
+        .map_err(|e| e.to_string())?;
+    if rows == 0 {
+        return Err("国策不存在".into());
+    }
+
+    if old_name != name {
+        let metadata =
+            serde_json::json!({ "old_name": old_name, "new_name": name }).to_string();
+        conn.execute(
+            "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'renamed', ?2, ?3)",
+            rusqlite::params![
+                id,
+                format!("从「{old_name}」更名为「{name}」"),
+                metadata
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    get_policy_json(conn, id)
+}
+
+fn add_policy_to_tree_core(
+    conn: &mut rusqlite::Connection,
+    policy_id: i64,
+    parent_node_id: Option<i64>,
+    sibling_order: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let policy_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM policies WHERE id = ?1",
+            [policy_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !policy_exists {
+        return Err("国策不存在".into());
+    }
+
+    if let Some(pid) = parent_node_id {
+        let parent_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM policy_tree_nodes WHERE id = ?1",
+                [pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !parent_exists {
+            return Err("目标父节点不存在".into());
+        }
+    }
+
+    let already_in_tree: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM policy_tree_nodes WHERE policy_id = ?1",
+            [policy_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if already_in_tree {
+        return Err("该国策已在树中".into());
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let order = resolve_tree_sibling_order(&tx, parent_node_id, None, sibling_order)?;
+
+    match parent_node_id {
+        Some(pid) => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order + 1
+                 WHERE parent_node_id = ?1 AND sibling_order >= ?2",
+                rusqlite::params![pid, order],
+            )
+            .map_err(|e| e.to_string())?,
+        None => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order + 1
+                 WHERE parent_node_id IS NULL AND sibling_order >= ?1",
+                [order],
+            )
+            .map_err(|e| e.to_string())?,
+    };
+
+    tx.execute(
+        "INSERT INTO policy_tree_nodes (policy_id, parent_node_id, sibling_order) VALUES (?1, ?2, ?3)",
+        rusqlite::params![policy_id, parent_node_id, order],
+    )
+    .map_err(|e| e.to_string())?;
+    let node_id = tx.last_insert_rowid();
+
+    tx.execute(
+        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'lit', ?2, ?3)",
+        rusqlite::params![policy_id, "国策已加入树并点亮", "{}"],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO policy_cycles (policy_id, tree_node_id) VALUES (?1, ?2)",
+        rusqlite::params![policy_id, node_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    get_tree_node_json(conn, node_id)
+}
+
+fn remove_policy_from_tree_core(
+    conn: &mut rusqlite::Connection,
+    node_id: i64,
+) -> Result<serde_json::Value, String> {
+    let node_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM policy_tree_nodes WHERE id = ?1",
+            [node_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !node_exists {
+        return Err("树节点不存在".into());
+    }
+
+    let node_ids = collect_subtree_node_ids(conn, node_id)?;
+    let root = load_tree_node_source(conn, node_id)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut affected_policy_ids: Vec<i64> = Vec::new();
+
+    for nid in &node_ids {
+        let (policy_id, parent_node_id, sibling_order, status, added_at): (
+            i64,
+            Option<i64>,
+            i64,
+            String,
+            String,
+        ) = tx
+            .query_row(
+                "SELECT policy_id, parent_node_id, sibling_order, status, added_at
+                 FROM policy_tree_nodes WHERE id = ?1",
+                [nid],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        if !affected_policy_ids.contains(&policy_id) {
+            affected_policy_ids.push(policy_id);
+        }
+
+        let metadata = serde_json::json!({
+            "tree_node_id": nid,
+            "parent_node_id": parent_node_id,
+            "sibling_order": sibling_order,
+            "status": status,
+            "added_at": added_at,
+        });
+        tx.execute(
+            "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'removed_from_tree', ?2, ?3)",
+            rusqlite::params![
+                policy_id,
+                format!("国策节点 {} 已移出树", nid),
+                metadata.to_string()
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 结束被移除节点的进行中周期
+    for nid in &node_ids {
+        tx.execute(
+            "UPDATE policy_cycles SET ended_at = datetime('now'), end_reason = 'removed_from_tree'
+             WHERE tree_node_id = ?1 AND ended_at IS NULL",
+            [nid],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 压缩被移除根节点所在兄弟列表
+    match root.old_parent_node_id {
+        Some(pid) => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order - 1
+                 WHERE parent_node_id = ?1 AND sibling_order > ?2",
+                rusqlite::params![pid, root.old_sibling_order],
+            )
+            .map_err(|e| e.to_string())?,
+        None => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order - 1
+                 WHERE parent_node_id IS NULL AND sibling_order > ?1",
+                [root.old_sibling_order],
+            )
+            .map_err(|e| e.to_string())?,
+    };
+
+    let placeholders = node_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    tx.execute(
+        &format!("DELETE FROM policy_tree_nodes WHERE id IN ({})", placeholders),
+        rusqlite::params_from_iter(node_ids.iter()),
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "removed_node_ids": node_ids,
+        "affected_policy_ids": affected_policy_ids,
+    }))
+}
+
+fn reparent_tree_node_core(
+    conn: &mut rusqlite::Connection,
+    node_id: i64,
+    new_parent_node_id: Option<i64>,
+    new_sibling_order: Option<i64>,
+    event_reason: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let source = load_tree_node_source(conn, node_id)?;
+
+    if let Some(pid) = new_parent_node_id {
+        if pid == node_id {
+            return Err("不能把节点移动到自身下".into());
+        }
+        let parent_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM policy_tree_nodes WHERE id = ?1",
+                [pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !parent_exists {
+            return Err("目标父节点不存在".into());
+        }
+        let parent_is_descendant: bool = conn
+            .query_row(
+                "WITH RECURSIVE descendants(id) AS (
+                    SELECT id FROM policy_tree_nodes WHERE parent_node_id = ?1
+                    UNION ALL
+                    SELECT n.id FROM policy_tree_nodes n JOIN descendants d ON n.parent_node_id = d.id
+                 )
+                 SELECT EXISTS(SELECT 1 FROM descendants WHERE id = ?2)",
+                rusqlite::params![node_id, pid],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if parent_is_descendant {
+            return Err("不能把节点移动到自己的子孙节点下".into());
+        }
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let order =
+        resolve_tree_sibling_order(&tx, new_parent_node_id, Some(node_id), new_sibling_order)?;
+
+    if source.old_parent_node_id == new_parent_node_id && source.old_sibling_order == order {
+        tx.commit().map_err(|e| e.to_string())?;
+        return get_tree_node_json(conn, node_id);
+    }
+
+    // 1. 压缩旧兄弟列表
+    match source.old_parent_node_id {
+        Some(pid) => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order - 1
+                 WHERE parent_node_id = ?1 AND id != ?2 AND sibling_order > ?3",
+                rusqlite::params![pid, node_id, source.old_sibling_order],
+            )
+            .map_err(|e| e.to_string())?,
+        None => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order - 1
+                 WHERE parent_node_id IS NULL AND id != ?1 AND sibling_order > ?2",
+                rusqlite::params![node_id, source.old_sibling_order],
+            )
+            .map_err(|e| e.to_string())?,
+    };
+
+    // 2. 新兄弟列表让位
+    match new_parent_node_id {
+        Some(pid) => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order + 1
+                 WHERE parent_node_id = ?1 AND id != ?2 AND sibling_order >= ?3",
+                rusqlite::params![pid, node_id, order],
+            )
+            .map_err(|e| e.to_string())?,
+        None => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order + 1
+                 WHERE parent_node_id IS NULL AND id != ?1 AND sibling_order >= ?2",
+                rusqlite::params![node_id, order],
+            )
+            .map_err(|e| e.to_string())?,
+    };
+
+    // 3. 更新节点
+    tx.execute(
+        "UPDATE policy_tree_nodes SET parent_node_id = ?2, sibling_order = ?3 WHERE id = ?1",
+        rusqlite::params![node_id, new_parent_node_id, order],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let old_parent_name = source
+        .old_parent_node_id
+        .and_then(|pid| node_name(&tx, pid));
+    let new_parent_name = new_parent_node_id.and_then(|pid| node_name(&tx, pid));
+    let metadata = serde_json::json!({
+        "old_parent_node_id": source.old_parent_node_id,
+        "new_parent_node_id": new_parent_node_id,
+        "old_parent_name": old_parent_name,
+        "new_parent_name": new_parent_name,
+    });
+    let note = event_reason.unwrap_or_else(|| match (old_parent_name, new_parent_name) {
+        (Some(old), Some(new)) => format!("从「{old}」移动到「{new}」下"),
+        (Some(old), None) => format!("从「{old}」下提升为根节点"),
+        (None, Some(new)) => format!("从根节点移动到「{new}」下"),
+        (None, None) => "调整了父节点".to_string(),
+    });
+    tx.execute(
+        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'reparented', ?2, ?3)",
+        rusqlite::params![source.policy_id, note, metadata.to_string()],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    get_tree_node_json(conn, node_id)
+}
+
+fn reorder_tree_node_core(
+    conn: &mut rusqlite::Connection,
+    node_id: i64,
+    new_sibling_order: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let source = load_tree_node_source(conn, node_id)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let order = resolve_tree_sibling_order(
+        &tx,
+        source.old_parent_node_id,
+        Some(node_id),
+        new_sibling_order,
+    )?;
+
+    if order == source.old_sibling_order {
+        tx.commit().map_err(|e| e.to_string())?;
+        return get_tree_node_json(conn, node_id);
+    }
+
+    // 从旧位置移除
+    match source.old_parent_node_id {
+        Some(pid) => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order - 1
+                 WHERE parent_node_id = ?1 AND id != ?2 AND sibling_order > ?3",
+                rusqlite::params![pid, node_id, source.old_sibling_order],
+            )
+            .map_err(|e| e.to_string())?,
+        None => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order - 1
+                 WHERE parent_node_id IS NULL AND id != ?1 AND sibling_order > ?2",
+                rusqlite::params![node_id, source.old_sibling_order],
+            )
+            .map_err(|e| e.to_string())?,
+    };
+
+    // 插入新位置
+    match source.old_parent_node_id {
+        Some(pid) => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order + 1
+                 WHERE parent_node_id = ?1 AND id != ?2 AND sibling_order >= ?3",
+                rusqlite::params![pid, node_id, order],
+            )
+            .map_err(|e| e.to_string())?,
+        None => tx
+            .execute(
+                "UPDATE policy_tree_nodes SET sibling_order = sibling_order + 1
+                 WHERE parent_node_id IS NULL AND id != ?1 AND sibling_order >= ?2",
+                rusqlite::params![node_id, order],
+            )
+            .map_err(|e| e.to_string())?,
+    };
+
+    tx.execute(
+        "UPDATE policy_tree_nodes SET sibling_order = ?2 WHERE id = ?1",
+        rusqlite::params![node_id, order],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let metadata = serde_json::json!({
+        "old_sibling_order": source.old_sibling_order,
+        "new_sibling_order": order,
+    });
+    tx.execute(
+        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'reordered', ?2, ?3)",
+        rusqlite::params![
+            source.policy_id,
+            format!("调整顺序为 {}", order),
+            metadata.to_string()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    get_tree_node_json(conn, node_id)
+}
+
+fn light_policy_core(
+    conn: &mut rusqlite::Connection,
+    node_id: i64,
+) -> Result<serde_json::Value, String> {
+    let source = load_tree_node_source(conn, node_id)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE policy_tree_nodes SET status = 'lit' WHERE id = ?1",
+        [node_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'lit', ?2, ?3)",
+        rusqlite::params![
+            source.policy_id,
+            "国策已点亮",
+            serde_json::json!({ "tree_node_id": node_id }).to_string()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO policy_cycles (policy_id, tree_node_id) VALUES (?1, ?2)",
+        rusqlite::params![source.policy_id, node_id],
+    )
+    .map_err(|e| e.to_string())?;
+    let cycle_id = tx.last_insert_rowid();
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({ "cycle": get_cycle_json(conn, cycle_id)? }))
+}
+
+fn extinguish_policy_core(
+    conn: &mut rusqlite::Connection,
+    node_id: i64,
+    reason: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let source = load_tree_node_source(conn, node_id)?;
+    let clean_reason = reason
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "用户裁定该国策当前熄灭".to_string());
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE policy_tree_nodes SET status = 'extinguished' WHERE id = ?1",
+        [node_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'extinguished', ?2, ?3)",
+        rusqlite::params![
+            source.policy_id,
+            clean_reason,
+            serde_json::json!({ "tree_node_id": node_id }).to_string()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let open_cycle: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM policy_cycles WHERE tree_node_id = ?1 AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+            [node_id],
+            |row| row.get(0),
+        )
+        .ok();
+    let cycle_id = match open_cycle {
+        Some(cycle_id) => {
+            tx.execute(
+                "UPDATE policy_cycles SET ended_at = datetime('now'), end_reason = ?2 WHERE id = ?1",
+                rusqlite::params![cycle_id, clean_reason],
+            )
+            .map_err(|e| e.to_string())?;
+            cycle_id
+        }
+        None => tx
+            .query_row(
+                "SELECT id FROM policy_cycles WHERE tree_node_id = ?1 ORDER BY id DESC LIMIT 1",
+                [node_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "该国策节点没有周期记录".to_string())?,
+    };
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({ "cycle": get_cycle_json(conn, cycle_id)? }))
+}
+
+fn permanently_delete_policy_core(
+    conn: &mut rusqlite::Connection,
+    policy_id: i64,
+) -> Result<serde_json::Value, String> {
+    let policy_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM policies WHERE id = ?1",
+            [policy_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !policy_exists {
+        return Err("国策不存在".into());
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut removed_tree_node_ids: Vec<i64> = Vec::new();
+    let mut affected_child_policy_ids: Vec<i64> = Vec::new();
+
+    let root_node: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM policy_tree_nodes WHERE policy_id = ?1",
+            [policy_id],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(root_node_id) = root_node {
+        let subtree = collect_subtree_node_ids(&tx, root_node_id)?;
+        removed_tree_node_ids = subtree.clone();
+        for nid in &subtree {
+            let child_policy_id: i64 = tx
+                .query_row(
+                    "SELECT policy_id FROM policy_tree_nodes WHERE id = ?1",
+                    [nid],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if child_policy_id != policy_id && !affected_child_policy_ids.contains(&child_policy_id)
+            {
+                affected_child_policy_ids.push(child_policy_id);
+            }
+        }
+        let placeholders = subtree.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        tx.execute(
+            &format!(
+                "DELETE FROM policy_tree_nodes WHERE id IN ({})",
+                placeholders
+            ),
+            rusqlite::params_from_iter(subtree.iter()),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 删除 policy 本身；其 cycles / events 由外键级联清理
+    tx.execute("DELETE FROM policies WHERE id = ?1", [policy_id])
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "deleted_policy_id": policy_id,
+        "removed_tree_node_ids": removed_tree_node_ids,
+        "affected_child_policy_ids": affected_child_policy_ids,
+    }))
+}
+
+fn get_policy_tree_core(conn: &rusqlite::Connection) -> Result<serde_json::Value, String> {
+    let mut node_stmt = conn
+        .prepare(&format!(
+            "SELECT {}
+             FROM policy_tree_nodes t
+             JOIN policies p ON p.id = t.policy_id
+             ORDER BY COALESCE(t.parent_node_id, 0), t.sibling_order, t.id",
+            POLICY_TREE_NODE_WITH_POLICY_FIELDS
+        ))
+        .map_err(|e| e.to_string())?;
+    let node_rows = node_stmt
+        .query_map([], policy_tree_node_with_policy_json)
+        .map_err(|e| e.to_string())?;
+    let mut nodes = Vec::new();
+    for row in node_rows {
+        nodes.push(row.map_err(|e| e.to_string())?);
+    }
+
+    let mut cycle_stmt = conn
+        .prepare(&format!(
+            "SELECT {} FROM policy_cycles ORDER BY started_at DESC, id DESC",
+            POLICY_CYCLE_FIELDS
+        ))
+        .map_err(|e| e.to_string())?;
+    let cycle_rows = cycle_stmt
+        .query_map([], policy_cycle_json)
+        .map_err(|e| e.to_string())?;
+    let mut cycles = Vec::new();
+    for row in cycle_rows {
+        cycles.push(row.map_err(|e| e.to_string())?);
+    }
+
+    Ok(serde_json::json!({ "nodes": nodes, "cycles": cycles }))
+}
+
+fn get_policy_library_core(
+    conn: &rusqlite::Connection,
+    in_tree: Option<bool>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut sql = String::from(
+        "SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                CASE WHEN t.id IS NULL THEN 0 ELSE 1 END AS in_tree,
+                t.status AS tree_status
+         FROM policies p
+         LEFT JOIN policy_tree_nodes t ON t.policy_id = p.id",
+    );
+    match in_tree {
+        Some(true) => sql.push_str(" WHERE t.id IS NOT NULL"),
+        Some(false) => sql.push_str(" WHERE t.id IS NULL"),
+        None => {}
+    }
+    sql.push_str(" ORDER BY p.created_at DESC, p.id DESC");
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "description": row.get::<_, String>(2)?,
+                "created_at": row.get::<_, String>(3)?,
+                "updated_at": row.get::<_, String>(4)?,
+                "in_tree": row.get::<_, i64>(5)? != 0,
+                "tree_status": row.get::<_, Option<String>>(6)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut policies = Vec::new();
+    for row in rows {
+        policies.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(policies)
+}
+
+fn get_policy_events_core(
+    conn: &rusqlite::Connection,
+    policy_id: i64,
+    limit: Option<i64>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let safe_limit = limit.unwrap_or(20).clamp(1, 100);
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {}
+             FROM policy_events
+             WHERE policy_id = ?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?2",
+            POLICY_EVENT_FIELDS
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![policy_id, safe_limit], policy_event_json)
+        .map_err(|e| e.to_string())?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(events)
+}
+
+fn get_policy_cycles_core(
+    conn: &rusqlite::Connection,
+    policy_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {}
+             FROM policy_cycles
+             WHERE policy_id = ?1
+             ORDER BY started_at DESC, id DESC",
+            POLICY_CYCLE_FIELDS
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([policy_id], policy_cycle_json)
+        .map_err(|e| e.to_string())?;
+    let mut cycles = Vec::new();
+    for row in rows {
+        cycles.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(cycles)
+}
+
+fn undo_remove_from_tree_core(
+    conn: &mut rusqlite::Connection,
+    removed_node_ids: Vec<i64>,
+    affected_policy_ids: Vec<i64>,
+) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    for node_id in removed_node_ids {
+        let already_restored: bool = tx
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM policy_tree_nodes WHERE id = ?1",
+                [node_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if already_restored {
+            continue;
+        }
+
+        let info: Option<(i64, String)> = tx
+            .query_row(
+                "SELECT policy_id, metadata FROM policy_events
+                 WHERE event_type = 'removed_from_tree' AND metadata LIKE ?1
+                 ORDER BY created_at DESC, id DESC LIMIT 1",
+                [format!("%\"tree_node_id\":{}%", node_id)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+        let Some((policy_id, metadata_text)) = info else {
+            continue;
+        };
+        let metadata: serde_json::Value =
+            serde_json::from_str(&metadata_text).map_err(|e| e.to_string())?;
+        let parent_node_id = metadata["parent_node_id"].as_i64();
+        let sibling_order = metadata["sibling_order"].as_i64().unwrap_or(0);
+        let status = metadata["status"]
+            .as_str()
+            .unwrap_or("lit")
+            .to_string();
+        let added_at = metadata["added_at"].as_str().unwrap_or("").to_string();
+
+        tx.execute(
+            "INSERT INTO policy_tree_nodes (id, policy_id, parent_node_id, sibling_order, status, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                node_id,
+                policy_id,
+                parent_node_id,
+                sibling_order,
+                status,
+                added_at
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+
+        // 重新打开因移除而结束的周期
+        tx.execute(
+            "UPDATE policy_cycles SET ended_at = NULL, end_reason = NULL
+             WHERE tree_node_id = ?1 AND end_reason = 'removed_from_tree'",
+            [node_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 防御：按 policy 兜底重开周期（policy 在树中至多出现一次，安全）
+    for policy_id in affected_policy_ids {
+        tx.execute(
+            "UPDATE policy_cycles SET ended_at = NULL, end_reason = NULL
+             WHERE policy_id = ?1 AND end_reason = 'removed_from_tree'",
+            [policy_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn undo_reparent_core(
+    conn: &mut rusqlite::Connection,
+    node_id: i64,
+    old_parent_node_id: Option<i64>,
+    old_sibling_order: i64,
+) -> Result<(), String> {
+    reparent_tree_node_core(
+        conn,
+        node_id,
+        old_parent_node_id,
+        Some(old_sibling_order),
+        Some("撤销移动".to_string()),
+    )
+    .map(|_| ())
+}
+
+fn undo_extinguish_core(conn: &mut rusqlite::Connection, node_id: i64) -> Result<(), String> {
+    let source = load_tree_node_source(conn, node_id)?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE policy_tree_nodes SET status = 'lit' WHERE id = ?1",
+        [node_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // 重新打开最近一次被熄灭关闭的周期
+    let latest_ended_cycle: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM policy_cycles
+             WHERE tree_node_id = ?1 AND ended_at IS NOT NULL
+             ORDER BY id DESC LIMIT 1",
+            [node_id],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(cycle_id) = latest_ended_cycle {
+        tx.execute(
+            "UPDATE policy_cycles SET ended_at = NULL, end_reason = NULL WHERE id = ?1",
+            [cycle_id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        tx.execute(
+            "INSERT INTO policy_cycles (policy_id, tree_node_id) VALUES (?1, ?2)",
+            rusqlite::params![source.policy_id, node_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.execute(
+        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'lit', ?2, ?3)",
+        rusqlite::params![
+            source.policy_id,
+            "撤销熄灭，国策重新点亮",
+            serde_json::json!({ "tree_node_id": node_id }).to_string()
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_policy(
+    state: tauri::State<'_, Database>,
+    name: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    create_policy_core(&conn, name, description)
+}
+
+#[tauri::command]
+fn get_policies(state: tauri::State<'_, Database>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_policies_core(&conn)
+}
+
+#[tauri::command]
+fn update_policy(
+    state: tauri::State<'_, Database>,
+    id: i64,
+    name: String,
+    description: String,
+) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    update_policy_core(&conn, id, name, description)
+}
+
+#[tauri::command]
+fn add_policy_to_tree(
+    state: tauri::State<'_, Database>,
+    policy_id: i64,
+    parent_node_id: Option<i64>,
+    sibling_order: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    add_policy_to_tree_core(&mut conn, policy_id, parent_node_id, sibling_order)
+}
+
+#[tauri::command]
+fn remove_policy_from_tree(
+    state: tauri::State<'_, Database>,
+    node_id: i64,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    remove_policy_from_tree_core(&mut conn, node_id)
+}
+
+#[tauri::command]
+fn reparent_tree_node(
+    state: tauri::State<'_, Database>,
+    node_id: i64,
+    new_parent_node_id: Option<i64>,
+    new_sibling_order: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    reparent_tree_node_core(&mut conn, node_id, new_parent_node_id, new_sibling_order, None)
+}
+
+#[tauri::command]
+fn reorder_tree_node(
+    state: tauri::State<'_, Database>,
+    node_id: i64,
+    new_sibling_order: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    reorder_tree_node_core(&mut conn, node_id, new_sibling_order)
+}
+
+#[tauri::command]
+fn light_policy(
+    state: tauri::State<'_, Database>,
+    node_id: i64,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    light_policy_core(&mut conn, node_id)
+}
+
+#[tauri::command]
+fn extinguish_policy(
+    state: tauri::State<'_, Database>,
+    node_id: i64,
+    reason: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    extinguish_policy_core(&mut conn, node_id, reason)
+}
+
+#[tauri::command]
+fn permanently_delete_policy(
+    state: tauri::State<'_, Database>,
+    policy_id: i64,
+) -> Result<serde_json::Value, String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    permanently_delete_policy_core(&mut conn, policy_id)
+}
+
+#[tauri::command]
+fn get_policy_tree(state: tauri::State<'_, Database>) -> Result<serde_json::Value, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_policy_tree_core(&conn)
+}
+
+#[tauri::command]
+fn get_policy_library(
+    state: tauri::State<'_, Database>,
+    in_tree: Option<bool>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_policy_library_core(&conn, in_tree)
+}
+
+#[tauri::command]
+fn get_policy_events(
+    state: tauri::State<'_, Database>,
+    policy_id: i64,
+    limit: Option<i64>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_policy_events_core(&conn, policy_id, limit)
+}
+
+#[tauri::command]
+fn get_policy_cycles(
+    state: tauri::State<'_, Database>,
+    policy_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    get_policy_cycles_core(&conn, policy_id)
+}
+
+#[tauri::command]
+fn undo_remove_from_tree(
+    state: tauri::State<'_, Database>,
+    removed_node_ids: Vec<i64>,
+    affected_policy_ids: Vec<i64>,
+) -> Result<(), String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    undo_remove_from_tree_core(&mut conn, removed_node_ids, affected_policy_ids)
+}
+
+#[tauri::command]
+fn undo_reparent(
+    state: tauri::State<'_, Database>,
+    node_id: i64,
+    old_parent_node_id: Option<i64>,
+    old_sibling_order: i64,
+) -> Result<(), String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    undo_reparent_core(&mut conn, node_id, old_parent_node_id, old_sibling_order)
+}
+
+#[tauri::command]
+fn undo_extinguish(state: tauri::State<'_, Database>, node_id: i64) -> Result<(), String> {
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    undo_extinguish_core(&mut conn, node_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -4688,6 +5908,23 @@ pub fn run() {
             get_chain_review_stats,
             get_failure_debug_summary,
             get_precedent_review_list,
+            create_policy,
+            get_policies,
+            update_policy,
+            add_policy_to_tree,
+            remove_policy_from_tree,
+            reparent_tree_node,
+            reorder_tree_node,
+            light_policy,
+            extinguish_policy,
+            permanently_delete_policy,
+            get_policy_tree,
+            get_policy_library,
+            get_policy_events,
+            get_policy_cycles,
+            undo_remove_from_tree,
+            undo_reparent,
+            undo_extinguish,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -5337,5 +6574,260 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    // ===== Policy System tests =====
+
+    fn policy_test_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        initialize_schema_on(&conn).unwrap();
+        conn
+    }
+
+    fn create_test_policy(conn: &rusqlite::Connection, name: &str) -> i64 {
+        let value = create_policy_core(conn, name.to_string(), "测试国策".to_string()).unwrap();
+        value["id"].as_i64().unwrap()
+    }
+
+    #[test]
+    fn policy_crud_roundtrip() {
+        let conn = policy_test_conn();
+
+        let policy =
+            create_policy_core(&conn, "早睡".to_string(), "11 点前入睡".to_string()).unwrap();
+        let id = policy["id"].as_i64().unwrap();
+
+        let all = get_policies_core(&conn).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0]["id"].as_i64(), Some(id));
+        assert_eq!(all[0]["name"].as_str(), Some("早睡"));
+
+        let updated =
+            update_policy_core(&conn, id, "早睡改".to_string(), "10 点半入睡".to_string()).unwrap();
+        assert_eq!(updated["name"].as_str(), Some("早睡改"));
+
+        let events = get_policy_events_core(&conn, id, None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event_type"].as_str(), Some("renamed"));
+    }
+
+    #[test]
+    fn add_policy_to_tree_creates_node_cycle_and_event() {
+        let mut conn = policy_test_conn();
+        let policy_id = create_test_policy(&conn, "国策A");
+
+        let node = add_policy_to_tree_core(&mut conn, policy_id, None, None).unwrap();
+        assert_eq!(node["id"].as_i64().is_some(), true);
+        assert_eq!(node["policy_id"].as_i64(), Some(policy_id));
+        assert_eq!(node["status"].as_str(), Some("lit"));
+
+        // 同一国策不能重复入树
+        assert!(add_policy_to_tree_core(&mut conn, policy_id, None, None).is_err());
+
+        let cycles = get_policy_cycles_core(&conn, policy_id).unwrap();
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0]["ended_at"], serde_json::Value::Null);
+
+        let events = get_policy_events_core(&conn, policy_id, None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event_type"].as_str(), Some("lit"));
+    }
+
+    #[test]
+    fn reparent_rejects_cycles() {
+        let mut conn = policy_test_conn();
+        let a = create_test_policy(&conn, "A");
+        let b = create_test_policy(&conn, "B");
+        let na = add_policy_to_tree_core(&mut conn, a, None, None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        let nb = add_policy_to_tree_core(&mut conn, b, Some(na), None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+
+        // 移动到自己的子孙下 → 循环
+        let err = reparent_tree_node_core(&mut conn, na, Some(nb), None, None).unwrap_err();
+        assert!(err.contains("子孙"), "got: {err}");
+        // 移动到自身下
+        let err = reparent_tree_node_core(&mut conn, na, Some(na), None, None).unwrap_err();
+        assert!(err.contains("自身"), "got: {err}");
+        // 目标父节点不存在
+        let err = reparent_tree_node_core(&mut conn, na, Some(999), None, None).unwrap_err();
+        assert!(err.contains("不存在"), "got: {err}");
+    }
+
+    #[test]
+    fn remove_from_tree_removes_subtree_but_keeps_policies() {
+        let mut conn = policy_test_conn();
+        let a = create_test_policy(&conn, "A");
+        let b = create_test_policy(&conn, "B");
+        let c = create_test_policy(&conn, "C");
+        let na = add_policy_to_tree_core(&mut conn, a, None, None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        let nb = add_policy_to_tree_core(&mut conn, b, Some(na), None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        add_policy_to_tree_core(&mut conn, c, Some(nb), None).unwrap();
+
+        let result = remove_policy_from_tree_core(&mut conn, nb).unwrap();
+        let removed = result["removed_node_ids"].as_array().unwrap();
+        assert_eq!(removed.len(), 2); // nb + nc
+        let affected = result["affected_policy_ids"].as_array().unwrap();
+        assert_eq!(affected.len(), 2); // b + c
+
+        // 国策保留在库中
+        let library = get_policy_library_core(&conn, None).unwrap();
+        assert_eq!(library.len(), 3);
+        let b_lib = library
+            .iter()
+            .find(|entry| entry["id"].as_i64() == Some(b))
+            .unwrap();
+        assert_eq!(b_lib["in_tree"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn extinguish_ends_cycle_and_writes_event() {
+        let mut conn = policy_test_conn();
+        let policy_id = create_test_policy(&conn, "X");
+        let node_id = add_policy_to_tree_core(&mut conn, policy_id, None, None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+
+        let result =
+            extinguish_policy_core(&mut conn, node_id, Some("执行失败".to_string())).unwrap();
+        assert_eq!(result["cycle"]["end_reason"].as_str(), Some("执行失败"));
+        assert!(result["cycle"]["ended_at"].as_str().is_some());
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM policy_tree_nodes WHERE id = ?1",
+                [node_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "extinguished");
+
+        let events = get_policy_events_core(&conn, policy_id, None).unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| event["event_type"].as_str() == Some("extinguished"))
+        );
+    }
+
+    #[test]
+    fn light_opens_new_cycle() {
+        let mut conn = policy_test_conn();
+        let policy_id = create_test_policy(&conn, "Y");
+        let node_id = add_policy_to_tree_core(&mut conn, policy_id, None, None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        extinguish_policy_core(&mut conn, node_id, None).unwrap();
+
+        let result = light_policy_core(&mut conn, node_id).unwrap();
+        let new_cycle_id = result["cycle"]["id"].as_i64().unwrap();
+
+        let cycles = get_policy_cycles_core(&conn, policy_id).unwrap();
+        assert_eq!(cycles.len(), 2);
+        let new_cycle = cycles
+            .iter()
+            .find(|cycle| cycle["id"].as_i64() == Some(new_cycle_id))
+            .unwrap();
+        assert_eq!(new_cycle["ended_at"], serde_json::Value::Null);
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM policy_tree_nodes WHERE id = ?1",
+                [node_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "lit");
+    }
+
+    #[test]
+    fn permanently_delete_keeps_child_policies_in_library() {
+        let mut conn = policy_test_conn();
+        let a = create_test_policy(&conn, "A");
+        let b = create_test_policy(&conn, "B");
+        let na = add_policy_to_tree_core(&mut conn, a, None, None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        add_policy_to_tree_core(&mut conn, b, Some(na), None).unwrap();
+
+        let result = permanently_delete_policy_core(&mut conn, a).unwrap();
+        assert_eq!(result["deleted_policy_id"].as_i64(), Some(a));
+        assert_eq!(result["removed_tree_node_ids"].as_array().unwrap().len(), 2);
+        assert_eq!(result["affected_child_policy_ids"].as_array().unwrap().len(), 1);
+        assert_eq!(result["affected_child_policy_ids"][0].as_i64(), Some(b));
+
+        // a 被永久删除，b 保留在库中
+        let library = get_policy_library_core(&conn, None).unwrap();
+        assert_eq!(library.len(), 1);
+        assert_eq!(library[0]["id"].as_i64(), Some(b));
+        assert_eq!(library[0]["in_tree"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn undo_remove_restores_nodes_and_cycles() {
+        let mut conn = policy_test_conn();
+        let a = create_test_policy(&conn, "A");
+        let b = create_test_policy(&conn, "B");
+        let na = add_policy_to_tree_core(&mut conn, a, None, None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        let nb = add_policy_to_tree_core(&mut conn, b, Some(na), None)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+
+        let result = remove_policy_from_tree_core(&mut conn, nb).unwrap();
+        let removed: Vec<i64> = result["removed_node_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_i64().unwrap())
+            .collect();
+        let affected: Vec<i64> = result["affected_policy_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_i64().unwrap())
+            .collect();
+
+        undo_remove_from_tree_core(&mut conn, removed, affected).unwrap();
+
+        // 节点以原 id 与父级恢复
+        let parent: Option<i64> = conn
+            .query_row(
+                "SELECT parent_node_id FROM policy_tree_nodes WHERE id = ?1",
+                [nb],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent, Some(na));
+
+        // 周期重新打开
+        let ended: Option<String> = conn
+            .query_row(
+                "SELECT ended_at FROM policy_cycles WHERE tree_node_id = ?1 AND ended_at IS NOT NULL",
+                [nb],
+                |row| row.get(0),
+            )
+            .ok();
+        assert!(ended.is_none());
+
+        let tree = get_policy_tree_core(&conn).unwrap();
+        assert_eq!(tree["nodes"].as_array().unwrap().len(), 2);
     }
 }
