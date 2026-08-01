@@ -11,6 +11,7 @@ export function rsipSummaryEventLabel(type: string): string {
   if (type === 'activated') return '定式点亮';
   if (type === 'deactivated') return '定式熄灭';
   if (type === 'rollback_child_deactivated') return '递归回滚';
+  if (type === 'reparented') return '定式调整父节点';
   return type;
 }
 
@@ -19,6 +20,7 @@ export function rsipTimelineEventLabel(type: string): string {
   if (type === 'activated') return 'RSIP 定式点亮';
   if (type === 'deactivated') return 'RSIP 定式熄灭';
   if (type === 'rollback_child_deactivated') return 'RSIP 子定式回滚熄灭';
+  if (type === 'reparented') return 'RSIP 定式调整父节点';
   return type;
 }
 
@@ -26,6 +28,7 @@ export function formulaEventLabel(type: FormulaEvent['event_type']): string {
   if (type === 'created') return '加入定式树';
   if (type === 'activated') return '点亮';
   if (type === 'deactivated') return '熄灭';
+  if (type === 'reparented') return '调整父节点';
   return '递归回滚';
 }
 

@@ -228,7 +228,8 @@ export interface FormulaEvent {
     | 'created'
     | 'activated'
     | 'deactivated'
-    | 'rollback_child_deactivated';
+    | 'rollback_child_deactivated'
+    | 'reparented';
   note: string;
   created_at: string;
 }

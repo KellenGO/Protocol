@@ -140,7 +140,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS formula_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 formula_id INTEGER NOT NULL,
-                event_type TEXT NOT NULL CHECK(event_type IN ('created', 'activated', 'deactivated', 'rollback_child_deactivated')),
+                event_type TEXT NOT NULL CHECK(event_type IN ('created', 'activated', 'deactivated', 'rollback_child_deactivated', 'reparented')),
                 note TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (formula_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
@@ -156,6 +156,7 @@ impl Database {
         migrate_precedents_to_core_schema(&conn)?;
         migrate_protocol_config_schema(&conn)?;
         migrate_rsip_goal_translation_schema(&conn)?;
+        migrate_formula_events_reparented(&conn)?;
 
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -269,6 +270,45 @@ fn migrate_rsip_goal_translation_schema(conn: &Connection) -> SqliteResult<()> {
     add_column_if_missing(conn, "rsip_formulas", "failure_path_id", "INTEGER")?;
     add_column_if_missing(conn, "rsip_formulas", "intervention_node_id", "TEXT")?;
     add_column_if_missing(conn, "rsip_formulas", "dependency_note", "TEXT")?;
+    Ok(())
+}
+
+fn migrate_formula_events_reparented(conn: &Connection) -> SqliteResult<()> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'formula_events'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if let Some(sql_text) = sql {
+        if sql_text.contains("reparented") {
+            return Ok(());
+        }
+    }
+
+    conn.execute_batch(
+        "
+        PRAGMA foreign_keys=OFF;
+        BEGIN TRANSACTION;
+        ALTER TABLE formula_events RENAME TO formula_events_v2beta_legacy;
+        CREATE TABLE formula_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            formula_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL CHECK(event_type IN ('created', 'activated', 'deactivated', 'rollback_child_deactivated', 'reparented')),
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (formula_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
+        );
+        INSERT INTO formula_events (id, formula_id, event_type, note, created_at)
+        SELECT id, formula_id, event_type, note, created_at FROM formula_events_v2beta_legacy;
+        DROP TABLE formula_events_v2beta_legacy;
+        COMMIT;
+        PRAGMA foreign_keys=ON;
+        ",
+    )?;
+
     Ok(())
 }
 

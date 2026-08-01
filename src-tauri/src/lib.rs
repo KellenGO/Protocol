@@ -2510,6 +2510,50 @@ fn move_rsip_formula_core(
         }
     }
 
+    if source.old_parent_id != new_parent_id {
+        let event_note = match (source.old_parent_id, new_parent_id) {
+            (None, Some(pid)) => {
+                let title: String = tx
+                    .query_row("SELECT title FROM rsip_formulas WHERE id = ?1", [pid], |row| {
+                        row.get(0)
+                    })
+                    .map_err(|e| e.to_string())?;
+                format!("从根节点移动到「{title}」下")
+            }
+            (Some(oid), Some(pid)) => {
+                let old_title: String = tx
+                    .query_row(
+                        "SELECT title FROM rsip_formulas WHERE id = ?1",
+                        [oid],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                let new_title: String = tx
+                    .query_row(
+                        "SELECT title FROM rsip_formulas WHERE id = ?1",
+                        [pid],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                format!("从「{old_title}」移动到「{new_title}」下")
+            }
+            (Some(oid), None) => {
+                let title: String = tx
+                    .query_row("SELECT title FROM rsip_formulas WHERE id = ?1", [oid], |row| {
+                        row.get(0)
+                    })
+                    .map_err(|e| e.to_string())?;
+                format!("从「{title}」下提升为根节点")
+            }
+            (None, None) => "调整了父节点".to_string(),
+        };
+        tx.execute(
+            "INSERT INTO formula_events (formula_id, event_type, note) VALUES (?1, 'reparented', ?2)",
+            rusqlite::params![id, event_note],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
     tx.commit().map_err(|e| e.to_string())?;
 
     let formula = get_rsip_formula_json(conn, id)?;
@@ -4017,6 +4061,15 @@ mod tests {
         assert_eq!(parent, Some(7));
         assert_eq!(old_parent, None);
         assert_eq!(position, 1);
+
+        let event_type: String = conn
+            .query_row(
+                "SELECT event_type FROM formula_events WHERE formula_id = 11 ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_type, "reparented");
     }
 
     #[test]
@@ -4137,6 +4190,13 @@ mod tests {
                     failure_path_id INTEGER,
                     intervention_node_id TEXT,
                     dependency_note TEXT
+                );
+                CREATE TABLE formula_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    formula_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
                 );
                 INSERT INTO rsip_formulas (id, parent_id, title, position) VALUES
                     (2, NULL, 'Two', 0),

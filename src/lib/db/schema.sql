@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS rsip_failure_paths (
 CREATE TABLE IF NOT EXISTS formula_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     formula_id INTEGER NOT NULL,
-    event_type TEXT NOT NULL CHECK(event_type IN ('created', 'activated', 'deactivated', 'rollback_child_deactivated')),
+    event_type TEXT NOT NULL CHECK(event_type IN ('created', 'activated', 'deactivated', 'rollback_child_deactivated', 'reparented')),
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (formula_id) REFERENCES rsip_formulas(id) ON DELETE CASCADE
