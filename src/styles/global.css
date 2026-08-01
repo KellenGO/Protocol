@@ -5159,3 +5159,235 @@ textarea,
     transform: translateY(0);
   }
 }
+
+/* ===== 国策库 ===== */
+
+.policy-library {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.policy-library-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.policy-library-search {
+  flex: 1;
+  min-width: 180px;
+  min-height: 34px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  font-size: 13px;
+  font-family: var(--font-body);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.policy-library-search:focus {
+  border-color: var(--gold);
+}
+
+.policy-library-create {
+  padding: 18px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.policy-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.policy-library-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 11px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s;
+}
+
+.policy-library-row:hover {
+  border-color: var(--border-default);
+}
+
+.policy-library-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.policy-library-status.lit {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.policy-library-status.out,
+.policy-library-status.extinguished {
+  background: rgba(140, 137, 130, 0.08);
+  color: var(--text-muted);
+}
+
+.policy-library-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.policy-library-name {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.policy-library-desc {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.policy-library-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.policy-library-actions .compact-btn {
+  min-height: 30px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* 国策库弹窗 */
+
+.policy-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 8, 10, 0.72);
+  animation: policy-modal-fade 0.18s ease-out;
+}
+
+.policy-modal {
+  width: min(440px, 100%);
+  padding: 22px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  animation: policy-modal-in 0.18s ease-out;
+}
+
+.policy-modal h3 {
+  margin-bottom: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  overflow-wrap: anywhere;
+}
+
+.policy-modal-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.policy-modal-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  background: var(--bg-base);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+  overflow-wrap: anywhere;
+}
+
+.policy-modal-option:hover {
+  border-color: var(--border-hover);
+}
+
+.policy-modal-option input[type='radio'] {
+  flex-shrink: 0;
+  accent-color: var(--gold);
+}
+
+.policy-modal-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.policy-modal-body p {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.policy-modal-body ul {
+  margin: 0 0 4px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.policy-modal-body li {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.policy-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+@keyframes policy-modal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes policy-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
