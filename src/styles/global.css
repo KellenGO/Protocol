@@ -5391,3 +5391,95 @@ textarea,
     transform: translateY(0) scale(1);
   }
 }
+
+/* ===== 国策树选择器（递归树） ===== */
+.policy-modal-wide {
+  max-width: 480px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.policy-modal-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: -4px 0 12px 0;
+}
+
+.policy-tree-selector {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 360px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 0;
+  margin-bottom: 12px;
+}
+
+.policy-tree-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  margin: 0 4px;
+  transition: background 0.12s;
+}
+
+.policy-tree-option:hover {
+  background: var(--bg-hover);
+}
+
+.policy-tree-option.selected {
+  background: var(--gold-subtle);
+}
+
+.policy-tree-option input[type="radio"] {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.policy-tree-option-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.policy-tree-expand {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  line-height: 1;
+}
+
+.policy-tree-expand:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.policy-tree-expand-spacer {
+  visibility: hidden;
+}
+
+.policy-tree-children {
+  /* 嵌套由 paddingLeft 缩进处理，无需额外 margin */
+}
+
+.policy-tree-branch {
+  /* 每个分支容器 */
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   addPolicyToTree,
   createPolicy,
@@ -6,6 +6,7 @@ import {
   removePolicyFromTree,
 } from '../../lib/db/policies';
 import type { PolicyWithTreeStatus } from '../../types';
+import { buildPolicyTree, type PolicyTreeNode } from './treeLayout';
 import { usePolicy } from './PolicyProvider';
 
 type LibraryFilter = 'all' | 'inTree' | 'notInTree' | 'lit' | 'extinguished';
@@ -45,8 +46,22 @@ export default function PolicyLibrary() {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  /** 树中已点亮节点，作为「作为子节点」的可选父节点 */
-  const litNodes = useMemo(() => treeNodes.filter((n) => n.status === 'lit'), [treeNodes]);
+  /** 完整国策树（递归），用于父节点选择器 */
+  const fullTree = useMemo(() => buildPolicyTree(treeNodes), [treeNodes]);
+
+  /** 收集某节点→根的路径面包屑 */
+  function breadcrumb(rootNodes: PolicyTreeNode[], targetNodeId: number): string {
+    function walk(nodes: PolicyTreeNode[], path: string[]): string | null {
+      for (const n of nodes) {
+        const next = [...path, n.node.policy_name];
+        if (n.node.id === targetNodeId) return next.join(' / ');
+        const found = walk(n.children, next);
+        if (found) return found;
+      }
+      return null;
+    }
+    return walk(rootNodes, []) ?? '';
+  }
 
   const visiblePolicies = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -302,60 +317,16 @@ export default function PolicyLibrary() {
       </div>
 
       {addTarget && (
-        <div className="policy-modal-overlay" onClick={() => !busy && setAddTarget(null)}>
-          <div
-            className="policy-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`加入「${addTarget.name}」到国策树`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3>加入「{addTarget.name}」到国策树</h3>
-            <div className="policy-modal-options">
-              <label className="policy-modal-option">
-                <input
-                  type="radio"
-                  name="parentNode"
-                  checked={parentNodeId === null}
-                  onChange={() => setParentNodeId(null)}
-                />
-                <span>作为根节点</span>
-              </label>
-              {litNodes.map((node) => (
-                <label key={node.id} className="policy-modal-option">
-                  <input
-                    type="radio"
-                    name="parentNode"
-                    checked={parentNodeId === node.id}
-                    onChange={() => setParentNodeId(node.id)}
-                  />
-                  <span>作为「{node.policy_name}」的子节点</span>
-                </label>
-              ))}
-            </div>
-            {litNodes.length === 0 && (
-              <p className="policy-modal-hint">树中暂无已点亮节点，只能作为根节点加入。</p>
-            )}
-            <div className="policy-modal-actions">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setAddTarget(null)}
-                disabled={busy}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleAddToTree}
-                disabled={busy}
-              >
-                加入并点亮
-              </button>
-            </div>
-          </div>
-        </div>
+        <AddToTreeModal
+          target={addTarget}
+          roots={fullTree}
+          breadcrumb={(id) => breadcrumb(fullTree, id)}
+          busy={busy}
+          onCancel={() => { setAddTarget(null); setParentNodeId(null); }}
+          onConfirm={() => handleAddToTree()}
+          parentNodeId={parentNodeId}
+          setParentNodeId={setParentNodeId}
+        />
       )}
 
       {deleteTarget && (
@@ -400,4 +371,209 @@ export default function PolicyLibrary() {
       )}
     </div>
   );
+}
+
+// ============================================================
+// AddToTreeModal — 递归树选择器
+// ============================================================
+
+function AddToTreeModal({
+  target,
+  roots,
+  breadcrumb,
+  busy,
+  onCancel,
+  onConfirm,
+  parentNodeId,
+  setParentNodeId,
+}: {
+  target: PolicyWithTreeStatus;
+  roots: PolicyTreeNode[];
+  breadcrumb: (nodeId: number) => string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  parentNodeId: number | null;
+  setParentNodeId: (id: number | null) => void;
+}) {
+  const [treeSearch, setTreeSearch] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(() => {
+    // 初始展开所有根节点
+    return new Set(roots.map((r) => r.node.id));
+  });
+
+  const toggleExpand = useCallback((id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** 自动展开搜索匹配节点的祖先路径 */
+  const autoExpandForSearch = useCallback((keyword: string) => {
+    if (!keyword) return;
+    const kw = keyword.toLowerCase();
+    const toExpand = new Set(expandedIds);
+
+    function walk(nodes: PolicyTreeNode[], ancestorIds: number[]) {
+      for (const n of nodes) {
+        if (subtreeMatches(n, kw)) {
+          ancestorIds.forEach((aid) => toExpand.add(aid));
+          toExpand.add(n.node.id);
+        }
+        walk(n.children, [...ancestorIds, n.node.id]);
+      }
+    }
+    walk(roots, []);
+    setExpandedIds(toExpand);
+  }, [roots, expandedIds]);
+
+  const selectedPath = parentNodeId !== null ? breadcrumb(parentNodeId) : '根节点';
+
+  return (
+    <div className="policy-modal-overlay" onClick={() => !busy && onCancel()}>
+      <div
+        className="policy-modal policy-modal-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`加入「${target.name}」到国策树`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>选择父国策</h3>
+        <p className="policy-modal-subtitle">
+          「{target.name}」将成为「{parentNodeId === null ? '根节点' : selectedPath}」的子国策
+        </p>
+
+        <input
+          type="search"
+          className="policy-library-search"
+          placeholder="搜索国策名称…"
+          value={treeSearch}
+          onChange={(e) => {
+            setTreeSearch(e.target.value);
+            autoExpandForSearch(e.target.value.trim().toLowerCase());
+          }}
+          aria-label="在国策树中搜索"
+        />
+
+        <div className="policy-tree-selector">
+          {/* 根节点选项始终第一 */}
+          <label className={`policy-tree-option${parentNodeId === null ? ' selected' : ''}`}>
+            <input
+              type="radio"
+              name="parentNode"
+              checked={parentNodeId === null}
+              onChange={() => setParentNodeId(null)}
+            />
+            <span className="policy-tree-option-label">作为新的根节点</span>
+          </label>
+
+          {/* 递归树 */}
+          {roots.length === 0 && (
+            <p className="policy-modal-hint">国策树为空，只能作为根节点加入。</p>
+          )}
+          {roots.map((root) => (
+            <TreeSelectorNode
+              key={root.node.id}
+              node={root}
+              depth={0}
+              selectedId={parentNodeId}
+              onSelect={setParentNodeId}
+              expandedIds={expandedIds}
+              onToggleExpand={toggleExpand}
+              searchKeyword={treeSearch.trim().toLowerCase()}
+            />
+          ))}
+        </div>
+
+        <div className="policy-modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+            取消
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+            加入并点亮
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TreeSelectorNode({
+  node,
+  depth,
+  selectedId,
+  onSelect,
+  expandedIds,
+  onToggleExpand,
+  searchKeyword,
+}: {
+  node: PolicyTreeNode;
+  depth: number;
+  selectedId: number | null;
+  onSelect: (id: number | null) => void;
+  expandedIds: Set<number>;
+  onToggleExpand: (id: number) => void;
+  searchKeyword: string;
+}) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expandedIds.has(node.node.id);
+  const isSelected = selectedId === node.node.id;
+
+  // 有搜索词时：本节点或子树匹配才渲染
+  if (searchKeyword) {
+    const selfMatch = node.node.policy_name.toLowerCase().includes(searchKeyword);
+    const childMatch = node.children.some((c) => subtreeMatches(c, searchKeyword));
+    if (!selfMatch && !childMatch) return null;
+  }
+
+  return (
+    <div className="policy-tree-branch">
+      <label
+        className={`policy-tree-option${isSelected ? ' selected' : ''}`}
+        style={{ paddingLeft: 16 + depth * 20 }}
+      >
+        {hasChildren && (
+          <button
+            type="button"
+            className="policy-tree-expand"
+            aria-label={isExpanded ? '收起' : '展开'}
+            onClick={(e) => { e.preventDefault(); onToggleExpand(node.node.id); }}
+          >
+            {isExpanded ? '▼' : '▶'}
+          </button>
+        )}
+        {!hasChildren && <span className="policy-tree-expand policy-tree-expand-spacer" />}
+        <input
+          type="radio"
+          name="parentNode"
+          checked={isSelected}
+          onChange={() => onSelect(node.node.id)}
+        />
+        <span className="policy-tree-option-label">{node.node.policy_name}</span>
+      </label>
+      {hasChildren && isExpanded && (
+        <div className="policy-tree-children">
+          {node.children.map((child) => (
+            <TreeSelectorNode
+              key={child.node.id}
+              node={child}
+              depth={depth + 1}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              expandedIds={expandedIds}
+              onToggleExpand={onToggleExpand}
+              searchKeyword={searchKeyword}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function subtreeMatches(node: PolicyTreeNode, keyword: string): boolean {
+  if (node.node.policy_name.toLowerCase().includes(keyword)) return true;
+  return node.children.some((c) => subtreeMatches(c, keyword));
 }
