@@ -4,8 +4,8 @@ const navItems = [
   { to: '/', label: 'Dashboard' },
   { to: '/chains', label: '主链' },
   { to: '/history', label: '协议时间线' },
-  { to: '/rsip', label: 'RSIP' },
-  { to: '/rsip-review', label: 'RSIP复盘' },
+  { to: '/rsip', label: '国策树' },
+  { to: '/rsip-review', label: '国策树复盘' },
   { to: '/data-management', label: '数据管理' },
   { to: '/settings', label: '设置' },
 ];
