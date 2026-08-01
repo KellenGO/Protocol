@@ -15,13 +15,8 @@ import {
   updateRsipFormula,
 } from '../lib/db';
 import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
-import {
-  buildFormulaTree,
-  findFormulaPath,
-  getContentBounds,
-  layoutForest,
-  type FormulaTreeNode,
-} from '../features/rsip/formulaTreeLayout';
+import { buildFormulaTree, type FormulaTreeNode } from '../features/rsip/formulaTreeLayout';
+import FormulaTreeCanvas from '../features/rsip/FormulaTreeCanvas';
 import type { FailurePathNode, FormulaEvent, RsipFailurePath, RsipFormula, RsipGoal } from '../types';
 
 type ActionFeedback = {
@@ -428,7 +423,7 @@ export default function RSIP() {
                 </p>
               </div>
             ) : (
-              <FormulaTreeGraph
+              <FormulaTreeCanvas
                 roots={tree}
                 selectedFormulaId={selectedFormulaId}
                 onSelect={setSelectedFormulaId}
@@ -1017,99 +1012,6 @@ function FormulaDetailPanel({
         </div>
       </div>
     </section>
-  );
-}
-
-function FormulaTreeGraph({
-  roots,
-  selectedFormulaId,
-  onSelect,
-}: {
-  roots: FormulaTreeNode[];
-  selectedFormulaId: number | null;
-  onSelect: (id: number) => void;
-}) {
-  const layout = useMemo(() => layoutForest(roots), [roots]);
-  const itemsById = new Map(layout.map((item) => [item.node.id, item]));
-  const selectedPath = selectedFormulaId ? findFormulaPath(roots, selectedFormulaId) : [];
-  const selectedPathIds = new Set(selectedPath.map((node) => node.id));
-  const content = useMemo(() => getContentBounds(layout), [layout]);
-  const canvasWidth = Math.max(320, content.left + content.width + 96);
-  const canvasHeight = Math.max(560, content.top + content.height + 96);
-
-  return (
-    <div className="formula-graph">
-      <div className="formula-graph-toolbar">
-        <span>整棵国策树 · {roots.length === 1 ? '单根纵向结构' : `${roots.length} 个根节点`}</span>
-        <div className="formula-graph-legend" aria-label="节点状态图例">
-          <span><i className="formula-graph-legend-dot active" />已点亮</span>
-          <span><i className="formula-graph-legend-dot" />未点亮</span>
-        </div>
-      </div>
-      <div className="formula-graph-viewport">
-        <div
-          className="formula-graph-canvas"
-          style={{ width: canvasWidth, height: canvasHeight }}
-        >
-          <svg
-            className="formula-graph-edges"
-            width={canvasWidth}
-            height={canvasHeight}
-            viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
-            aria-hidden="true"
-          >
-            {layout.map((item) => {
-              if (item.parentId === null) return null;
-              const parent = itemsById.get(item.parentId);
-              if (!parent) return null;
-
-              const startY = parent.y + parent.height / 2;
-              const endY = item.y - item.height / 2;
-              const middleY = startY + (endY - startY) * 0.5;
-              const isSelectedEdge =
-                selectedPathIds.has(parent.node.id) && selectedPathIds.has(item.node.id);
-              const isActiveEdge =
-                parent.node.status === 'active' && item.node.status === 'active';
-
-              return (
-                <path
-                  key={`${parent.node.id}-${item.node.id}`}
-                  className={`formula-graph-edge${isActiveEdge ? ' active' : ''}${isSelectedEdge ? ' selected' : ''}`}
-                  d={`M ${parent.x} ${startY} C ${parent.x} ${middleY}, ${item.x} ${middleY}, ${item.x} ${endY}`}
-                />
-              );
-            })}
-          </svg>
-          <div className="formula-graph-nodes" role="tree" aria-label="国策树习惯节点">
-            {layout.map((item) => {
-              const isSelected = selectedFormulaId === item.node.id;
-              return (
-                <button
-                  key={item.node.id}
-                  type="button"
-                  className={`formula-graph-node${item.node.status === 'active' ? ' active' : ''}${item.depth === 0 ? ' root' : ''}${isSelected ? ' selected' : ''}`}
-                  style={{
-                    left: item.x,
-                    top: item.y,
-                    width: item.width,
-                    minHeight: item.height,
-                  }}
-                  role="treeitem"
-                  aria-level={item.depth + 1}
-                  aria-selected={isSelected}
-                  aria-label={`${item.node.title}，${item.node.status === 'active' ? '已点亮' : '未点亮'}`}
-                  title={item.node.title}
-                  onClick={() => onSelect(item.node.id)}
-                >
-                  <span className="formula-graph-node-dot" aria-hidden="true" />
-                  <span className="formula-graph-node-title">{item.node.title}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 

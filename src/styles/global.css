@@ -2426,27 +2426,26 @@ textarea,
   background: var(--success);
 }
 
-.formula-graph-viewport {
+.formula-canvas-viewport {
   position: relative;
-  min-height: 590px;
-  overflow: auto;
+  height: min(720px, calc(100vh - 260px));
+  min-height: 560px;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
   background: var(--bg-base);
-  scrollbar-color: var(--border-hover) var(--bg-base);
+  cursor: grab;
 }
 
-.formula-graph-canvas {
-  position: relative;
-  min-height: 590px;
+.formula-canvas-viewport.is-panning {
+  cursor: grabbing;
 }
 
-.formula-graph-canvas::after {
-  content: '';
+.formula-canvas-world {
   position: absolute;
-  top: 112px;
-  right: 16px;
-  left: 16px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.025);
-  pointer-events: none;
+  left: 0;
+  top: 0;
+  will-change: transform;
 }
 
 .formula-graph-edges,
