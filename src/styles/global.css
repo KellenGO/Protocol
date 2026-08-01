@@ -4932,3 +4932,230 @@ textarea,
   pointer-events: none;
   z-index: 5;
 }
+
+/* ===== 国策树详情面板 ===== */
+
+.policies-tree-layout {
+  display: flex;
+  height: calc(100vh - 200px);
+  overflow: hidden;
+}
+
+.policies-tree-canvas-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.policies-tree-detail-panel {
+  width: 320px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  transform: translateX(0);
+  transition: transform 0.25s ease;
+  overflow-y: auto;
+}
+
+.policies-tree-detail-panel.closing {
+  transform: translateX(100%);
+}
+
+.policy-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.policy-detail-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.policy-detail-name-input:hover {
+  background: var(--bg-input);
+}
+
+.policy-detail-name-input:focus {
+  border-color: var(--gold);
+  background: var(--bg-input);
+}
+
+.policy-detail-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.policy-detail-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.policy-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.policy-detail-status-row {
+  display: flex;
+  align-items: center;
+}
+
+.policy-detail-body .form-field {
+  margin-bottom: 0;
+}
+
+.policy-detail-time {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.policy-detail-time span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.policy-detail-time strong {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.policy-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.policy-reason-input {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+
+.policy-reason-input input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.policy-reason-input input:focus {
+  border-color: var(--gold);
+}
+
+.policy-reason-input .btn {
+  min-height: 30px;
+  padding: 0 12px;
+}
+
+/* ===== 国策树操作 Toast ===== */
+
+.policy-toast {
+  position: fixed;
+  bottom: 80px;
+  left: 24px;
+  z-index: 120;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: min(420px, calc(100vw - 48px));
+  padding: 12px 14px;
+  background: rgba(28, 27, 24, 0.96);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  animation: policy-toast-in 0.22s ease-out;
+}
+
+.policy-toast-marker {
+  width: 4px;
+  min-height: 24px;
+  border-radius: 999px;
+  background: var(--gold);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.policy-toast-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.policy-toast p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.policy-toast-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.policy-toast-action {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+.policy-toast-action:hover {
+  color: var(--gold-hover);
+  text-decoration: underline;
+}
+
+@keyframes policy-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

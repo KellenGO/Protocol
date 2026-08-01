@@ -1,12 +1,14 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
-
-// 这些类型后面 Track A 会正式定义，现在先用占位 unknown
-type Policy = unknown;
-type TreeNodeWithPolicy = unknown;
+import type { PolicyCycle, PolicyEvent, PolicyWithTreeStatus, TreeNodeWithPolicy } from '../../types';
+import { getPolicyLibrary, getPolicyTree, getPolicyEvents, getPolicyCycles } from '../../lib/db/policies';
 
 interface PolicyContextValue {
-  policies: Policy[];
+  policies: PolicyWithTreeStatus[];
   treeNodes: TreeNodeWithPolicy[];
+  /** 按 policy_id 聚合的历史事件（后端倒序返回），供复盘使用 */
+  eventsByPolicyId: Record<number, PolicyEvent[]>;
+  /** 按 policy_id 聚合的执行周期，供复盘使用 */
+  cyclesByPolicyId: Record<number, PolicyCycle[]>;
   selectedNodeId: number | null;
   isDetailPanelOpen: boolean;
   loading: boolean;
@@ -20,18 +22,44 @@ interface PolicyContextValue {
 const PolicyContext = createContext<PolicyContextValue | null>(null);
 
 export function PolicyProvider({ children }: { children: ReactNode }) {
-  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [policies, setPolicies] = useState<PolicyWithTreeStatus[]>([]);
   const [treeNodes, setTreeNodes] = useState<TreeNodeWithPolicy[]>([]);
+  const [eventsByPolicyId, setEventsByPolicyId] = useState<Record<number, PolicyEvent[]>>({});
+  const [cyclesByPolicyId, setCyclesByPolicyId] = useState<Record<number, PolicyCycle[]>>({});
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const reload = useCallback(async () => {
-    // TODO: 替换为真实 API 调用
-    setPolicies([]);
-    setTreeNodes([]);
-    setLoading(false);
+    setLoading(true);
+    try {
+      const [tree, library] = await Promise.all([getPolicyTree(), getPolicyLibrary()]);
+      const details = await Promise.all(
+        tree.nodes.map(async (node) => {
+          const [events, cycles] = await Promise.all([
+            getPolicyEvents(node.policy_id, 100),
+            getPolicyCycles(node.policy_id),
+          ]);
+          return { policyId: node.policy_id, events, cycles };
+        }),
+      );
+      const nextEvents: Record<number, PolicyEvent[]> = {};
+      const nextCycles: Record<number, PolicyCycle[]> = {};
+      for (const detail of details) {
+        nextEvents[detail.policyId] = detail.events;
+        nextCycles[detail.policyId] = detail.cycles;
+      }
+      setTreeNodes(tree.nodes);
+      setPolicies(library);
+      setEventsByPolicyId(nextEvents);
+      setCyclesByPolicyId(nextCycles);
+      setError('');
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const toggleDetailPanel = useCallback((nodeId: number) => {
@@ -56,6 +84,8 @@ export function PolicyProvider({ children }: { children: ReactNode }) {
       value={{
         policies,
         treeNodes,
+        eventsByPolicyId,
+        cyclesByPolicyId,
         selectedNodeId,
         isDetailPanelOpen,
         loading,
