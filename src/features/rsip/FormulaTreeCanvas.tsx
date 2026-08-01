@@ -136,6 +136,30 @@ export default function FormulaTreeCanvas({
     revealNode(item);
   }, [highlightId, layout]);
 
+  function zoomByClick(multiplier: number) {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const cursorX = rect.width / 2;
+    const cursorY = rect.height / 2;
+    // 把期望倍率换算成 deltaY：scale * exp(-deltaY * 0.0015) = scale * multiplier
+    const deltaY = -Math.log(multiplier) / 0.0015;
+    setTransform((t) => zoomAtCursor(t, cursorX, cursorY, deltaY));
+  }
+
+  function fitAll() {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    setTransform(fitTransform(contentBounds, rect.width, rect.height));
+  }
+
+  function locateSelected() {
+    if (selectedFormulaId === null) return;
+    const item = layout.find((i) => i.node.id === selectedFormulaId);
+    if (item) revealNode(item);
+  }
+
   function handleViewportPointerDown(event: React.PointerEvent) {
     if ((event.target as HTMLElement).closest('.formula-graph-node')) return;
     if (event.button !== 0 && event.button !== 1) return;
@@ -184,6 +208,19 @@ export default function FormulaTreeCanvas({
       onPointerUp={handleViewportPointerUp}
       onPointerCancel={handleViewportPointerUp}
     >
+      <div className="formula-canvas-controls" aria-label="画布控制">
+        <button type="button" aria-label="缩小" onClick={() => zoomByClick(1 / 1.2)}>
+          －
+        </button>
+        <span className="formula-canvas-scale">{Math.round(transform.scale * 100)}%</span>
+        <button type="button" aria-label="放大" onClick={() => zoomByClick(1.2)}>
+          ＋
+        </button>
+        <button type="button" onClick={fitAll}>适应画布</button>
+        <button type="button" onClick={locateSelected} disabled={selectedFormulaId === null}>
+          定位选中节点
+        </button>
+      </div>
       <div
         className="formula-canvas-world"
         style={{ transform: `translate(${transform.panX}px, ${transform.panY}px) scale(${transform.scale})`, transformOrigin: '0 0' }}
