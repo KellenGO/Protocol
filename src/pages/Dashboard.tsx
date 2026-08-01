@@ -1,12 +1,25 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getDashboardSummary, getRecentProtocolEvents, getRsipSummary } from '../lib/db';
+import type { KeyboardEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { getDashboardSummary, getRecentProtocolEvents } from '../lib/db';
 import {
   formatRelativeProtocolTime,
   protocolEventTypeLabel,
-  rsipSummaryEventLabel,
 } from '../lib/protocolEvents';
-import type { DashboardSummary, ProtocolEvent, RsipSummary } from '../types';
+import type { DashboardSummary, ProtocolEvent } from '../types';
+import Review from './Review';
+import {
+  nextDashboardView,
+  parseDashboardView,
+  type DashboardView,
+} from './dashboardViewModel';
+
+const DASHBOARD_TABS: { key: DashboardView; label: string }[] = [
+  { key: 'overview', label: '总览' },
+  { key: 'chains', label: '主链复盘' },
+  { key: 'failures', label: '失败模式' },
+  { key: 'precedents', label: '判例复盘' },
+];
 
 function eventLabel(event: ProtocolEvent): string {
   if (event.event_type === 'focus') {
@@ -31,70 +44,131 @@ function activeStateLabel(state: DashboardSummary['active_protocol_state']): str
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [rsipSummary, setRsipSummary] = useState<RsipSummary | null>(null);
-  const [events, setEvents] = useState<ProtocolEvent[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = parseDashboardView(searchParams);
 
-  useEffect(() => {
-    Promise.all([getDashboardSummary(), getRecentProtocolEvents(), getRsipSummary()])
-      .then(([s, e, r]) => {
-        setSummary(s);
-        setEvents(e);
-        setRsipSummary(r);
-      })
-      .catch(console.error);
-  }, []);
+  function selectView(nextView: DashboardView) {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextView === 'overview') {
+      nextParams.delete('view');
+    } else {
+      nextParams.set('view', nextView);
+    }
+    setSearchParams(nextParams);
+  }
 
-  const activeState = summary?.active_protocol_state ?? 'none';
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentView: DashboardView) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const nextView = nextDashboardView(currentView, event.key === 'ArrowRight' ? 1 : -1);
+    selectView(nextView);
+    requestAnimationFrame(() => document.getElementById(`dashboard-tab-${nextView}`)?.focus());
+  }
 
   return (
-    <div className="page">
-      <h2>Dashboard</h2>
-
-      <div className="stat-grid">
-        <div className="stat-card">
-          <span className="stat-label">主链总数</span>
-          <span className="stat-value">{summary?.chain_count ?? '-'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">当前最长链</span>
-          <span className="stat-value">{summary?.max_current_chain_length ?? '-'} 节</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">今日完成主链</span>
-          <span className="stat-value">{summary?.today_completed_focus_count ?? '-'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">历史累计完成</span>
-          <span className="stat-value">{summary?.total_completed_focus_count ?? '-'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">当前协议状态</span>
-          <span className="stat-value stat-detail">{activeStateLabel(activeState)}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">RSIP 定式格</span>
-          <span className="stat-value">{rsipSummary?.total_formulas ?? '-'}</span>
-          <span className="stat-detail">
-            已点亮 {rsipSummary?.active_formulas ?? '-'} / 未点亮 {rsipSummary?.inactive_formulas ?? '-'}
-          </span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">最近 RSIP 状态</span>
-          <span className="stat-value stat-detail">
-            {rsipSummary?.latest_event ? rsipSummaryEventLabel(rsipSummary.latest_event.event_type) : '暂无定式事件'}
-          </span>
-          {rsipSummary?.latest_event && (
-            <span className="stat-detail">{rsipSummary.latest_event.formula_title}</span>
-          )}
+    <div className="page dashboard-page">
+      <div className="dashboard-header">
+        <div className="page-title-block">
+          <h2>Dashboard</h2>
+          <p className="page-subtitle">当前协议状态与历史复盘</p>
         </div>
       </div>
 
-      {activeState !== 'none' && summary?.active_chain_id && (
-        <div className="active-banner" role="status" aria-live="polite">
-          <span className="active-banner-text">{summary.active_chain_name}</span>
-          {activeState === 'focus' || activeState === 'focus_pending_ruling' ? (
+      <div className="dashboard-tabs" role="tablist" aria-label="Dashboard 视图">
+        {DASHBOARD_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            id={`dashboard-tab-${tab.key}`}
+            type="button"
+            role="tab"
+            aria-selected={view === tab.key}
+            aria-controls={`dashboard-panel-${tab.key}`}
+            tabIndex={view === tab.key ? 0 : -1}
+            className={`dashboard-tab ${view === tab.key ? 'dashboard-tab-active' : ''}`}
+            onClick={() => selectView(tab.key)}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div
+        id={`dashboard-panel-${view}`}
+        role="tabpanel"
+        aria-labelledby={`dashboard-tab-${view}`}
+      >
+        {view === 'overview' ? <DashboardOverview /> : <Review tab={view} />}
+      </div>
+    </div>
+  );
+}
+
+function DashboardOverview() {
+  const navigate = useNavigate();
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
+  const [events, setEvents] = useState<ProtocolEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getDashboardSummary()
+      .then((nextSummary) => {
+        if (!cancelled) setSummary(nextSummary);
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) setSummaryError(true);
+      });
+
+    getRecentProtocolEvents()
+      .then((nextEvents) => {
+        if (!cancelled) setEvents(nextEvents);
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) setEventsError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const activeState = summary?.active_protocol_state ?? 'none';
+  const hasActiveProtocol = activeState !== 'none' && Boolean(summary?.active_chain_id);
+
+  return (
+    <div className="dashboard-overview" role="tabpanel">
+      <div
+        className={`active-banner ${hasActiveProtocol ? '' : 'active-banner-idle'}`}
+        role="status"
+        aria-live="polite"
+      >
+        <div className="active-banner-copy">
+          <span className="active-banner-label">当前协议状态</span>
+          <strong className="active-banner-text">
+            {summaryError
+              ? '协议状态读取失败'
+              : summary === null
+              ? '正在读取协议状态...'
+              : hasActiveProtocol
+                ? summary.active_chain_name
+                : '无活跃协议流程'}
+          </strong>
+          {summary !== null && hasActiveProtocol && (
+            <span className="active-banner-detail">{activeStateLabel(activeState)}</span>
+          )}
+        </div>
+
+        {hasActiveProtocol && summary?.active_chain_id && (
+          activeState === 'focus' || activeState === 'focus_pending_ruling' ? (
             <button
               className="btn btn-primary"
               onClick={() => navigate(`/chains/${summary.active_chain_id}/focus${activeState === 'focus_pending_ruling' ? '?mode=ruling' : ''}`)}
@@ -108,36 +182,37 @@ export default function Dashboard() {
             >
               查看辅助链
             </button>
-          )}
-        </div>
-      )}
-
-      <div className="quick-actions">
-        <button className="btn btn-secondary" onClick={() => navigate('/chains')}>CTDP 主链</button>
-        <button className="btn btn-secondary" onClick={() => navigate('/rsip')}>RSIP 定式格</button>
+          )
+        )}
       </div>
 
-      <div className="recent-section">
+      <section className="recent-section">
         <h3>最近活动</h3>
-        {events.length === 0 ? (
+        {eventsLoading ? (
+          <p className="placeholder-text" aria-live="polite">正在读取最近活动...</p>
+        ) : eventsError ? (
+          <p className="placeholder-text" role="alert">最近活动读取失败，请稍后重试。</p>
+        ) : events.length === 0 ? (
           <p className="placeholder-text" aria-live="polite">暂无协议事件</p>
         ) : (
           <div className="recent-list">
-            {events.map((e) => (
-              <div key={`${e.event_type}-${e.id}`} className="recent-item">
+            {events.map((event) => (
+              <div key={`${event.event_type}-${event.id}`} className="recent-item">
                 <div className="recent-item-left">
-                  <span className={`event-type-badge event-${e.event_type}`}>{protocolEventTypeLabel(e.event_type)}</span>
-                  <span className="recent-chain-name">{e.chain_name}</span>
+                  <span className={`event-type-badge event-${event.event_type}`}>
+                    {protocolEventTypeLabel(event.event_type)}
+                  </span>
+                  <span className="recent-chain-name">{event.chain_name}</span>
                 </div>
                 <div className="recent-item-right">
-                  <span className={`recent-result result-${e.result}`}>{eventLabel(e)}</span>
-                  <span className="recent-time">{formatRelativeProtocolTime(e.event_time)}</span>
+                  <span className={`recent-result result-${event.result}`}>{eventLabel(event)}</span>
+                  <span className="recent-time">{formatRelativeProtocolTime(event.event_time)}</span>
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

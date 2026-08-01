@@ -50,7 +50,7 @@ interface ChainReviewSummary {
   steadiest: ChainDerivedStats | null;
 }
 
-type ReviewTab = 'chains' | 'failures' | 'precedents';
+export type ReviewTab = 'chains' | 'failures' | 'precedents';
 type TimePeriod = 'all' | '7d' | '30d' | 'month';
 
 /** 构建本地时间的 since 字符串，避免 UTC 偏移导致日期不符合直觉 */
@@ -76,15 +76,6 @@ const PERIOD_LABELS: Record<TimePeriod, string> = {
   month: '本月',
 };
 
-const TABS: { key: ReviewTab; label: string }[] = [
-  { key: 'chains', label: '按主链复盘' },
-  { key: 'failures', label: '失败模式复盘' },
-  { key: 'precedents', label: '判例复盘' },
-];
-
-const REVIEW_HINT =
-  'History 展示协议事件时间线，Review 聚焦失败模式、协议边界变化和链稳定性。';
-
 function scopeLabel(scope: string): string {
   return scope === 'main_chain' ? '主链' : '辅助链';
 }
@@ -94,69 +85,59 @@ function statusBadge(status: string): { label: string; className: string } {
   return { label: '已废止', className: 'status-archived' };
 }
 
-export default function Review() {
+export default function Review({ tab }: { tab: ReviewTab }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<ReviewTab>('chains');
   const [period, setPeriod] = useState<TimePeriod>('all');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [chainStats, setChainStats] = useState<ChainReviewStats[]>([]);
   const [failureSummary, setFailureSummary] = useState<FailureDebugSummary[]>([]);
   const [precedentList, setPrecedentList] = useState<PrecedentReviewItem[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
+    setError(null);
     const since = sinceFromPeriod(period);
 
-    if (tab === 'chains') {
-      getChainReviewStats(since)
-        .then(setChainStats)
-        .catch(console.error)
-        .finally(() => setLoading(false));
-    } else if (tab === 'failures') {
-      getFailureDebugSummary(since)
-        .then(setFailureSummary)
-        .catch(console.error)
-        .finally(() => setLoading(false));
-    } else {
-      getPrecedentReviewList(since)
-        .then(setPrecedentList)
-        .catch(console.error)
-        .finally(() => setLoading(false));
+    async function loadReview() {
+      try {
+        if (tab === 'chains') {
+          const stats = await getChainReviewStats(since);
+          if (!cancelled) setChainStats(stats);
+        } else if (tab === 'failures') {
+          const summary = await getFailureDebugSummary(since);
+          if (!cancelled) setFailureSummary(summary);
+        } else {
+          const precedents = await getPrecedentReviewList(since);
+          if (!cancelled) setPrecedentList(precedents);
+        }
+      } catch (loadError) {
+        console.error(loadError);
+        if (!cancelled) setError('复盘数据加载失败，请重试。');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
+
+    void loadReview();
+    return () => {
+      cancelled = true;
+    };
   }, [tab, period]);
 
   return (
-    <div className="page review-page">
-      <div className="review-hero">
-        <div className="page-title-block">
-          <h2>协议复盘</h2>
-          <p className="page-subtitle">{REVIEW_HINT}</p>
-        </div>
-      </div>
-
+    <section className="dashboard-review-panel">
       <div className="review-controls control-card">
-        <div className="review-control-group">
-          <span className="review-control-label">复盘模式</span>
-          <div className="review-tabs">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                className={`review-tab ${tab === t.key ? 'review-tab-active' : ''}`}
-                onClick={() => setTab(t.key)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <div className="review-control-group">
           <span className="review-control-label">时间范围</span>
           <div className="review-period-options">
             {(Object.keys(PERIOD_LABELS) as TimePeriod[]).map((p) => (
               <button
                 key={p}
+                type="button"
+                aria-pressed={period === p}
                 className={`review-period-btn ${period === p ? 'review-period-active' : ''}`}
                 onClick={() => setPeriod(p)}
               >
@@ -171,6 +152,13 @@ export default function Review() {
         <div className="review-loading">
           <p className="placeholder-text">正在汇总复盘数据...</p>
         </div>
+      ) : error ? (
+        <div className="review-empty-card" role="alert">
+          <div className="empty-state">
+            <p className="empty-title">复盘数据加载失败</p>
+            <p className="empty-desc">{error}</p>
+          </div>
+        </div>
       ) : (
         <>
           {tab === 'chains' && <ChainsReview stats={chainStats} navigate={navigate} />}
@@ -178,7 +166,7 @@ export default function Review() {
           {tab === 'precedents' && <PrecedentsReview list={precedentList} navigate={navigate} period={period} />}
         </>
       )}
-    </div>
+    </section>
   );
 }
 

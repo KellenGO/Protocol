@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "node src/pages/dashboardViewModel.test.ts",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
-    "check": "npm run typecheck && npm run lint",
+    "check": "npm run test && npm run typecheck && npm run lint",
     "check:full": "npm run typecheck && npm run build && cd src-tauri && cargo check",
     "preview": "vite preview",
     "tauri": "tauri"
