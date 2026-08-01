@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node src/pages/dashboardViewModel.test.ts",
+    "test": "node src/pages/dashboardViewModel.test.ts && node src/features/rsip/formulaTreeLayout.test.ts",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "check": "npm run test && npm run typecheck && npm run lint",
