@@ -290,7 +290,8 @@ export interface DatabaseInfo {
 }
 
 export interface BackupFileInfo {
-  path: string;
+  source_path: string;
+  restore_preview_path: string;
   file_size_bytes: number;
   version: number;
   tables: {

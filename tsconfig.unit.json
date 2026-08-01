@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "rootDir": "src",
+    "outDir": ".unit-tests",
+    "noEmit": false
+  },
+  "include": [
+    "src/features/ctdp/sessionTiming.ts",
+    "src/features/ctdp/sessionTiming.test.ts",
+    "src/features/ctdp/focusSessionActions.ts",
+    "src/features/ctdp/focusSessionActions.test.ts"
+  ]
+}

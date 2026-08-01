@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "test": "node src/pages/dashboardViewModel.test.ts && node src/features/rsip/formulaTreeLayout.test.ts && node src/features/rsip/formulaTreeGeometry.test.ts",
     "typecheck": "tsc -b --noEmit",
+    "test:unit": "node scripts/run-unit-tests.mjs",
     "lint": "eslint .",
     "check": "npm run test && npm run typecheck && npm run lint",
     "check:full": "npm run typecheck && npm run build && cd src-tauri && cargo check",

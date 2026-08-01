@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
@@ -13,6 +13,8 @@ import {
   setFocusSessionPendingRuling,
 } from '../lib/db';
 import { FAILURE_DEBUG_CATEGORIES } from '../features/ctdp/protocolOptions';
+import { getFocusSessionActionState } from '../features/ctdp/focusSessionActions';
+import { useDeadlineCountdown } from '../features/ctdp/useDeadlineCountdown';
 import type {
   ActiveFocusSession,
   Chain,
@@ -65,7 +67,6 @@ export default function FocusSessionPage() {
   const [chain, setChain] = useState<Chain | null>(null);
   const [session, setSession] = useState<ActiveFocusSession | null>(null);
   const [precedents, setPrecedents] = useState<ChainPrecedent[]>([]);
-  const [remaining, setRemaining] = useState(0);
   const [phase, setPhase] = useState<Phase>('loading');
   const [error, setError] = useState('');
   const [doneResult, setDoneResult] = useState<DoneResult | null>(null);
@@ -75,7 +76,14 @@ export default function FocusSessionPage() {
   const [debugNote, setDebugNote] = useState('');
   const [rulingError, setRulingError] = useState('');
 
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const {
+    remainingSeconds: remaining,
+    deadlineError,
+    refresh: refreshDeadline,
+  } = useDeadlineCountdown(
+    session?.expected_end_at ?? null,
+    phase === 'running',
+  );
 
   useEffect(() => {
     if (!chainId) return;
@@ -107,8 +115,6 @@ export default function FocusSessionPage() {
             return;
           }
 
-          const end = new Date(active.expected_end_at + 'Z').getTime();
-          setRemaining(Math.max(0, Math.ceil((end - Date.now()) / 1000)));
           setPhase('running');
         } else {
           setPhase('empty');
@@ -123,25 +129,6 @@ export default function FocusSessionPage() {
       cancelled = true;
     };
   }, [chainId, searchParams]);
-
-  useEffect(() => {
-    if (phase !== 'running') return;
-
-    timerRef.current = setInterval(() => {
-      setRemaining((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [phase]);
-
-  useEffect(() => {
-    if (remaining === 0 && phase === 'running' && timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }, [remaining, phase]);
 
   function getBehavior(): string | null {
     const behavior = resolveBehavior(behaviorType, customBehavior);
@@ -166,9 +153,8 @@ export default function FocusSessionPage() {
 
   async function returnToTask() {
     if (session) await clearFocusSessionPendingRuling(session.id).catch(console.error);
-    const end = session?.expected_end_at ? new Date(session.expected_end_at + 'Z').getTime() : Date.now();
-    setRemaining(Math.max(0, Math.ceil((end - Date.now()) / 1000)));
     setPhase('running');
+    refreshDeadline();
     navigate(`/chains/${chainId}/focus`, { replace: true });
   }
 
@@ -217,10 +203,10 @@ export default function FocusSessionPage() {
     }
   }
 
-  if (error) {
+  if (error || deadlineError) {
     return (
       <div className="page">
-        <p className="placeholder-text">发生错误：{error}</p>
+        <p className="placeholder-text">发生错误：{error || deadlineError}</p>
         <button className="btn btn-secondary" onClick={() => navigate(`/chains/${chainId}`)}>
           返回链详情
         </button>
@@ -320,7 +306,8 @@ export default function FocusSessionPage() {
     );
   }
 
-  const isTimerDone = remaining === 0;
+  const actionState = getFocusSessionActionState(remaining);
+  const isTimerDone = actionState.timerDone;
 
   return (
     <div className="page session-page">
@@ -340,13 +327,14 @@ export default function FocusSessionPage() {
           </div>
 
           <div className="session-actions">
-            {isTimerDone ? (
+            {actionState.showComplete && (
               <button className="btn btn-primary btn-large" onClick={handleComplete}>
                 确认主链完成
               </button>
-            ) : (
+            )}
+            {actionState.showRuling && (
               <button className="btn btn-danger-outline" onClick={enterRuling}>
-                进入裁决
+                {isTimerDone ? '未完成，进入裁决' : '进入裁决'}
               </button>
             )}
             <button className="btn btn-secondary" onClick={() => navigate(`/chains/${chainId}`)}>
