@@ -136,13 +136,20 @@ function wasRelit(events: PolicyEvent[]): boolean {
 }
 
 export default function PolicyReview() {
-  const { treeNodes, eventsByPolicyId, cyclesByPolicyId, loading, error } = usePolicy();
-  const [expandedNodeId, setExpandedNodeId] = useState<number | null>(null);
+  const { policies, treeNodes, eventsByPolicyId, cyclesByPolicyId, loading, error } = usePolicy();
+  const [expandedPolicyId, setExpandedPolicyId] = useState<number | null>(null);
 
   const summary = useMemo(
     () => computeSummary(treeNodes, eventsByPolicyId),
     [treeNodes, eventsByPolicyId],
   );
+
+  /** 按 policy_id 查找 tree node（可能已从树移除故为 null） */
+  const nodeByPolicyId = useMemo(() => {
+    const map = new Map<number, TreeNodeWithPolicy>();
+    for (const n of treeNodes) map.set(n.policy_id, n);
+    return map;
+  }, [treeNodes]);
 
   if (loading) {
     return (
@@ -162,12 +169,12 @@ export default function PolicyReview() {
     );
   }
 
-  if (treeNodes.length === 0) {
+  if (policies.length === 0) {
     return (
       <div className="review-empty-card">
         <div className="empty-state">
           <p className="empty-title">还没有国策</p>
-          <p className="empty-desc">将国策加入国策树并点亮后，复盘会在这里形成完整执行历史。</p>
+          <p className="empty-desc">创建国策后，复盘会在这里展示完整执行历史。</p>
         </div>
       </div>
     );
@@ -204,16 +211,20 @@ export default function PolicyReview() {
         </div>
 
         <div className="policy-review-list">
-          {treeNodes.map((node) => {
-            const expanded = expandedNodeId === node.id;
+          {policies.map((policy) => {
+            const node = nodeByPolicyId.get(policy.id) ?? null;
+            const events = eventsByPolicyId[policy.id] ?? [];
+            const cycles = cyclesByPolicyId[policy.id] ?? [];
+            const expanded = expandedPolicyId === policy.id;
             return (
               <PolicyReviewCard
-                key={node.id}
+                key={policy.id}
+                policy={policy}
                 node={node}
-                events={eventsByPolicyId[node.policy_id] ?? []}
-                cycles={cyclesByPolicyId[node.policy_id] ?? []}
+                events={events}
+                cycles={cycles}
                 expanded={expanded}
-                onToggle={() => setExpandedNodeId(expanded ? null : node.id)}
+                onToggle={() => setExpandedPolicyId(expanded ? null : policy.id)}
               />
             );
           })}
@@ -224,23 +235,26 @@ export default function PolicyReview() {
 }
 
 function PolicyReviewCard({
+  policy,
   node,
   events,
   cycles,
   expanded,
   onToggle,
 }: {
-  node: TreeNodeWithPolicy;
+  policy: { name: string };
+  node: TreeNodeWithPolicy | null;
   events: PolicyEvent[];
   cycles: PolicyCycle[];
   expanded: boolean;
   onToggle: () => void;
 }) {
-  // 最近一个未结束的周期（后端按 started_at 倒序返回）
   const openCycle = cycles.find((cycle) => cycle.ended_at === null) ?? null;
   const openCycleDays = openCycle ? cycleDays(openCycle) : null;
   const cycleCount = cycles.length;
   const extinguishCount = events.filter((event) => event.event_type === 'extinguished').length;
+  const status = node?.status ?? 'out';
+  const statusLabel = status === 'lit' ? '点亮' : status === 'extinguished' ? '熄灭' : '不在树中';
 
   return (
     <article className={`policy-review-card${expanded ? ' is-expanded' : ''}`}>
@@ -250,9 +264,9 @@ function PolicyReviewCard({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        <span className="policy-review-name">{node.policy_name}</span>
-        <span className={`policy-review-status ${node.status}`}>
-          {node.status === 'lit' ? '点亮' : '熄灭'}
+        <span className="policy-review-name">{policy.name}</span>
+        <span className={`policy-review-status ${status}`}>
+          {statusLabel}
         </span>
         <span className="policy-review-stat">
           {openCycleDays !== null ? `${openCycleDays}天` : '—'}
@@ -263,7 +277,9 @@ function PolicyReviewCard({
 
       {expanded && (
         <PolicyReviewDetail
-          node={node}
+          policyName={policy.name}
+          status={status}
+          statusLabel={statusLabel}
           events={events}
           openCycleDays={openCycleDays}
           cycleCount={cycleCount}
@@ -275,13 +291,17 @@ function PolicyReviewCard({
 }
 
 function PolicyReviewDetail({
-  node,
+  policyName,
+  status,
+  statusLabel,
   events,
   openCycleDays,
   cycleCount,
   extinguishCount,
 }: {
-  node: TreeNodeWithPolicy;
+  policyName: string;
+  status: string;
+  statusLabel: string;
   events: PolicyEvent[];
   openCycleDays: number | null;
   cycleCount: number;
@@ -289,13 +309,13 @@ function PolicyReviewDetail({
 }) {
   return (
     <div className="policy-review-detail">
-      <h3 className="policy-detail-title">{node.policy_name}</h3>
+      <h3 className="policy-detail-title">{policyName}</h3>
 
       <div className="policy-detail-stats">
         <div className="policy-detail-stat">
           <span>当前状态</span>
-          <strong className={`policy-detail-status ${node.status}`}>
-            {node.status === 'lit' ? '点亮' : '熄灭'}
+          <strong className={`policy-detail-status ${status}`}>
+            {statusLabel}
           </strong>
         </div>
         <div className="policy-detail-stat">

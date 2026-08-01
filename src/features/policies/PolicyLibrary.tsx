@@ -4,6 +4,7 @@ import {
   createPolicy,
   permanentlyDeletePolicy,
   removePolicyFromTree,
+  updatePolicy,
 } from '../../lib/db/policies';
 import type { PolicyWithTreeStatus } from '../../types';
 import { buildPolicyTree, type PolicyTreeNode } from './treeLayout';
@@ -42,6 +43,11 @@ export default function PolicyLibrary() {
 
   // 永久删除确认弹窗
   const [deleteTarget, setDeleteTarget] = useState<PolicyWithTreeStatus | null>(null);
+
+  // 编辑弹窗
+  const [editTarget, setEditTarget] = useState<PolicyWithTreeStatus | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
 
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -157,7 +163,27 @@ export default function PolicyLibrary() {
     }
   }
 
-  async function handleDelete() {
+  async function handleUpdate(e: FormEvent) {
+    e.preventDefault();
+    if (!editTarget || !editName.trim()) return;
+    setBusy(true);
+    setActionError('');
+    try {
+      await updatePolicy(editTarget.id, { name: editName.trim(), description: editDesc.trim() });
+      await reload();
+      setEditTarget(null);
+    } catch (err) {
+      setActionError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(target: PolicyWithTreeStatus) {
+    setDeleteTarget(target);
+  }
+
+  async function confirmDelete() {
     if (!deleteTarget) return;
     setBusy(true);
     setActionError('');
@@ -273,6 +299,19 @@ export default function PolicyLibrary() {
                 )}
               </div>
               <div className="policy-library-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost compact-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setEditTarget(p);
+                    setEditName(p.name);
+                    setEditDesc(p.description);
+                    setActionError('');
+                  }}
+                >
+                  编辑
+                </button>
                 {!p.in_tree && (
                   <button
                     type="button"
@@ -288,28 +327,23 @@ export default function PolicyLibrary() {
                   </button>
                 )}
                 {p.in_tree && (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-ghost compact-btn"
-                      disabled={busy}
-                      onClick={() => handleRemoveFromTree(p)}
-                    >
-                      从树移除
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger-outline compact-btn"
-                      disabled={busy}
-                      onClick={() => {
-                        setDeleteTarget(p);
-                        setActionError('');
-                      }}
-                    >
-                      永久删除
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className="btn btn-ghost compact-btn"
+                    disabled={busy}
+                    onClick={() => handleRemoveFromTree(p)}
+                  >
+                    从树移除
+                  </button>
                 )}
+                <button
+                  type="button"
+                  className="btn btn-danger-outline compact-btn"
+                  disabled={busy}
+                  onClick={() => handleDelete(p)}
+                >
+                  永久删除
+                </button>
               </div>
             </div>
           );
@@ -360,13 +394,57 @@ export default function PolicyLibrary() {
               <button
                 type="button"
                 className="btn btn-danger"
-                onClick={handleDelete}
+                onClick={confirmDelete}
                 disabled={busy}
               >
                 永久删除
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {editTarget && (
+        <div className="policy-modal-overlay" onClick={() => !busy && setEditTarget(null)}>
+          <form
+            className="policy-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`编辑「${editTarget.name}」`}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleUpdate}
+          >
+            <h3>编辑「{editTarget.name}」</h3>
+            <div className="form-field">
+              <span>名称</span>
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="form-field">
+              <span>执行说明</span>
+              <textarea
+                rows={3}
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+              />
+            </div>
+            <div className="policy-modal-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setEditTarget(null)}
+                disabled={busy}
+              >
+                取消
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={busy || !editName.trim()}>
+                保存
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
