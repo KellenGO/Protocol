@@ -136,6 +136,7 @@ export default function RSIP() {
       setShowCreateForm(false);
       await reload();
       setSelectedFormulaId(created.id);
+      setHighlightId(created.id);
       setActionFeedback({
         tone: 'success',
         text: `已写入「${createdTitle}」，可以继续点亮、添加子节点或进入复盘。`,
@@ -264,8 +265,12 @@ export default function RSIP() {
     setSelectedFormulaId(result.formula.id);
     setHighlightId(result.formula.id);
     const movedTitle = result.formula.title;
+    const noteHint =
+      result.old_parent_id !== null && result.formula.dependency_note === null
+        ? ' 原依赖说明已随移动清空，如需保留依赖关系请重新填写。'
+        : '';
     if (result.new_parent_id === null) {
-      setActionFeedback({ tone: 'success', text: `已将「${movedTitle}」提升为根节点。` });
+      setActionFeedback({ tone: 'success', text: `已将「${movedTitle}」提升为根节点。${noteHint}` });
       return;
     }
     const targetTitle =
@@ -276,7 +281,7 @@ export default function RSIP() {
         : '';
     setActionFeedback({
       tone: 'success',
-      text: `已将「${movedTitle}」移动到「${targetTitle}」下${rollbackNote}。`,
+      text: `已将「${movedTitle}」移动到「${targetTitle}」下${rollbackNote}。${noteHint}`,
     });
   }
 
