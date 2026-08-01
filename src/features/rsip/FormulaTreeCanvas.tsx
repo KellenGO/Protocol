@@ -71,6 +71,9 @@ export default function FormulaTreeCanvas({
   const [transform, setTransform] = useState<CanvasTransform>({ panX: 0, panY: 0, scale: 1 });
   const [interaction, setInteraction] = useState<InteractionState>({ type: 'idle' });
   const [moving, setMoving] = useState(false);
+  const [moveAnimating, setMoveAnimating] = useState(false);
+  const [flashId, setFlashId] = useState<number | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
   const [dragPointer, setDragPointer] = useState<{
     screen: { x: number; y: number };
     world: { x: number; y: number };
@@ -80,6 +83,13 @@ export default function FormulaTreeCanvas({
   useEffect(() => {
     transformRef.current = transform;
   }, [transform]);
+
+  // 卸载时清理闪烁计时器，避免卸载后 setState
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+    };
+  }, []);
 
   const layout = useMemo(() => layoutForest(roots), [roots]);
   const itemsById = useMemo(
@@ -250,7 +260,12 @@ export default function FormulaTreeCanvas({
         newParentId,
         allowStatusRollback: allowRollback,
       });
+      setFlashId(nodeId);
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(() => setFlashId(null), 1000);
       await onMoved(result);
+      setMoveAnimating(true);
+      window.setTimeout(() => setMoveAnimating(false), 220);
     } catch (err) {
       onError(String(err));
     } finally {
@@ -401,7 +416,7 @@ export default function FormulaTreeCanvas({
         拖到这里，提升为根节点
       </div>
       <div
-        className="formula-canvas-world"
+        className={`formula-canvas-world${moveAnimating ? ' animating-move' : ''}`}
         style={{ transform: `translate(${transform.panX}px, ${transform.panY}px) scale(${transform.scale})`, transformOrigin: '0 0' }}
       >
         <svg
@@ -455,7 +470,7 @@ export default function FormulaTreeCanvas({
               <button
                 key={item.node.id}
                 type="button"
-                className={`formula-graph-node${item.node.status === 'active' ? ' active' : ''}${item.depth === 0 ? ' root' : ''}${isSelected ? ' selected' : ''}${interaction.type === 'dragging-node' && interaction.nodeId === item.node.id ? ' is-dragging' : ''}${interaction.type === 'dragging-node' && interaction.targetParentId === item.node.id ? ' is-drop-target' : ''}`}
+                className={`formula-graph-node${item.node.status === 'active' ? ' active' : ''}${item.depth === 0 ? ' root' : ''}${isSelected ? ' selected' : ''}${interaction.type === 'dragging-node' && interaction.nodeId === item.node.id ? ' is-dragging' : ''}${interaction.type === 'dragging-node' && interaction.targetParentId === item.node.id ? ' is-drop-target' : ''}${flashId === item.node.id ? ' flash-new' : ''}`}
                 style={{ left: item.x, top: item.y, width: item.width, minHeight: item.height }}
                 role="treeitem"
                 aria-level={item.depth + 1}

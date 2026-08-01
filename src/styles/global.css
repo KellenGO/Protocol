@@ -2569,6 +2569,10 @@ textarea,
   }
 }
 
+.formula-canvas-world.animating-move .formula-graph-node {
+  transition: left 0.2s ease, top 0.2s ease;
+}
+
 .formula-graph-edges,
 .formula-graph-nodes {
   position: absolute;
