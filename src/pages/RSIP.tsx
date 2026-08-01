@@ -17,6 +17,7 @@ import {
 import { formatProtocolDateTime, formulaEventLabel } from '../lib/protocolEvents';
 import { buildFormulaTree, type FormulaTreeNode } from '../features/rsip/formulaTreeLayout';
 import FormulaTreeCanvas from '../features/rsip/FormulaTreeCanvas';
+import type { MoveRsipFormulaResult } from '../lib/db';
 import type { FailurePathNode, FormulaEvent, RsipFailurePath, RsipFormula, RsipGoal } from '../types';
 
 type ActionFeedback = {
@@ -43,6 +44,7 @@ export default function RSIP() {
   const [archivingGoalId, setArchivingGoalId] = useState<number | null>(null);
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(null);
   const [selectedFormulaId, setSelectedFormulaId] = useState<number | null>(null);
+  const [highlightId, setHighlightId] = useState<number | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [title, setTitle] = useState('');
@@ -257,6 +259,27 @@ export default function RSIP() {
     }
   }
 
+  async function handleMoved(result: MoveRsipFormulaResult) {
+    await reload();
+    setSelectedFormulaId(result.formula.id);
+    setHighlightId(result.formula.id);
+    const movedTitle = result.formula.title;
+    if (result.new_parent_id === null) {
+      setActionFeedback({ tone: 'success', text: `已将「${movedTitle}」提升为根节点。` });
+      return;
+    }
+    const targetTitle =
+      formulas.find((f) => f.id === result.new_parent_id)?.title ?? `#${result.new_parent_id}`;
+    const rollbackNote =
+      result.deactivated_ids.length > 0
+        ? `；递归熄灭了 ${result.deactivated_ids.length} 个已点亮节点`
+        : '';
+    setActionFeedback({
+      tone: 'success',
+      text: `已将「${movedTitle}」移动到「${targetTitle}」下${rollbackNote}。`,
+    });
+  }
+
   async function handleWizardComplete(_formula: RsipFormula, goalId: number) {
     setWizardOpen(false);
     setSelectedGoalId(goalId);
@@ -426,7 +449,10 @@ export default function RSIP() {
               <FormulaTreeCanvas
                 roots={tree}
                 selectedFormulaId={selectedFormulaId}
+                highlightId={highlightId}
                 onSelect={setSelectedFormulaId}
+                onMoved={handleMoved}
+                onError={(message) => setError(message)}
               />
             )}
           </section>

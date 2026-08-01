@@ -1,12 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { moveRsipFormula, type MoveRsipFormulaResult } from '../../lib/db';
 import {
+  collectSubtreeIds,
+  findFormulaNode,
   findFormulaPath,
   getContentBounds,
   layoutForest,
+  nodeRect,
   type FormulaTreeNode,
   type LayoutNode,
 } from './formulaTreeLayout';
-import { fitTransform, zoomAtCursor, type CanvasTransform } from './formulaTreeGeometry';
+import {
+  fitTransform,
+  isPointInsideExpandedRect,
+  screenToWorld,
+  zoomAtCursor,
+  type CanvasTransform,
+} from './formulaTreeGeometry';
+
+const DRAG_THRESHOLD = 6;
 
 type InteractionState =
   | { type: 'idle' }
@@ -22,6 +34,7 @@ type InteractionState =
       nodeId: number;
       pointerId: number;
       targetParentId: number | null;
+      overRootZone: boolean;
     }
   | {
       type: 'panning';
@@ -37,20 +50,31 @@ export default function FormulaTreeCanvas({
   selectedFormulaId,
   highlightId,
   onSelect,
+  onMoved,
+  onError,
 }: {
   roots: FormulaTreeNode[];
   selectedFormulaId: number | null;
   highlightId?: number | null;
   onSelect: (id: number) => void;
+  onMoved: (result: MoveRsipFormulaResult) => void | Promise<void>;
+  onError: (message: string) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const rootZoneRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
   const wheelRequestRef = useRef<{ cursorX: number; cursorY: number; deltaY: number } | null>(null);
   const didFitRef = useRef(false);
+  const didDragRef = useRef(false);
   const lastHandledHighlightRef = useRef<number | null>(null);
 
   const [transform, setTransform] = useState<CanvasTransform>({ panX: 0, panY: 0, scale: 1 });
   const [interaction, setInteraction] = useState<InteractionState>({ type: 'idle' });
+  const [moving, setMoving] = useState(false);
+  const [dragPointer, setDragPointer] = useState<{
+    screen: { x: number; y: number };
+    world: { x: number; y: number };
+  } | null>(null);
 
   const transformRef = useRef(transform);
   useEffect(() => {
@@ -160,8 +184,100 @@ export default function FormulaTreeCanvas({
     if (item) revealNode(item);
   }
 
+  function subtreeHasActive(node: FormulaTreeNode): boolean {
+    if (node.status === 'active') return true;
+    return node.children.some(subtreeHasActive);
+  }
+
+  function isPointInRootZone(x: number, y: number): boolean {
+    const zone = rootZoneRef.current;
+    const viewport = viewportRef.current;
+    if (!zone || !viewport) return false;
+    const zoneRect = zone.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    return (
+      x >= zoneRect.left - viewportRect.left &&
+      x <= zoneRect.right - viewportRect.left &&
+      y >= zoneRect.top - viewportRect.top &&
+      y <= zoneRect.bottom - viewportRect.top
+    );
+  }
+
+  function hitTest(world: { x: number; y: number }, draggedId: number): number | null {
+    const banned = new Set<number>();
+    const dragged = findFormulaNode(roots, draggedId);
+    if (dragged) collectSubtreeIds(dragged, banned);
+    let best: LayoutNode | null = null;
+    let bestDistance = Infinity;
+    for (const item of layout) {
+      if (item.node.id === draggedId || banned.has(item.node.id)) continue;
+      if (!isPointInsideExpandedRect(world, nodeRect(item), 14)) continue;
+      const d = (world.x - item.x) ** 2 + (world.y - item.y) ** 2;
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = item;
+      }
+    }
+    return best ? best.node.id : null;
+  }
+
+  function updateDragPointer(event: React.PointerEvent) {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const world = screenToWorld(event.clientX, event.clientY, rect, transformRef.current);
+    setDragPointer({
+      screen: { x: event.clientX - rect.left, y: event.clientY - rect.top },
+      world,
+    });
+  }
+
+  async function commitMove(nodeId: number, newParentId: number | null) {
+    const moved = findFormulaNode(roots, nodeId);
+    if (!moved) return;
+    const target = newParentId === null ? null : findFormulaNode(roots, newParentId);
+    let allowRollback = false;
+    if (target && target.status === 'inactive' && subtreeHasActive(moved)) {
+      if (!window.confirm('目标父节点尚未点亮。继续移动将熄灭该节点及其已点亮子节点。')) {
+        return;
+      }
+      allowRollback = true;
+    }
+    setMoving(true);
+    try {
+      const result = await moveRsipFormula({
+        id: nodeId,
+        newParentId,
+        allowStatusRollback: allowRollback,
+      });
+      await onMoved(result);
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  function handleNodePointerDown(event: React.PointerEvent, nodeId: number) {
+    if (moving) return;
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    didDragRef.current = false;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.setPointerCapture(event.pointerId);
+    setInteraction({
+      type: 'pending-node-drag',
+      nodeId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    });
+  }
+
   function handleViewportPointerDown(event: React.PointerEvent) {
     if ((event.target as HTMLElement).closest('.formula-graph-node')) return;
+    if (moving) return;
     if (event.button !== 0 && event.button !== 1) return;
     event.preventDefault();
     const viewport = viewportRef.current;
@@ -180,12 +296,47 @@ export default function FormulaTreeCanvas({
   function handleViewportPointerMove(event: React.PointerEvent) {
     const current = interaction;
     if (current.type === 'idle' || event.pointerId !== current.pointerId) return;
+
     if (current.type === 'panning') {
       setTransform((t) => ({
         ...t,
         panX: current.initialPanX + (event.clientX - current.startX),
         panY: current.initialPanY + (event.clientY - current.startY),
       }));
+      return;
+    }
+
+    if (current.type === 'pending-node-drag') {
+      if (Math.hypot(event.clientX - current.startX, event.clientY - current.startY) <= DRAG_THRESHOLD) {
+        return;
+      }
+      didDragRef.current = true;
+      updateDragPointer(event);
+      setInteraction({
+        type: 'dragging-node',
+        nodeId: current.nodeId,
+        pointerId: current.pointerId,
+        targetParentId: null,
+        overRootZone: false,
+      });
+      return;
+    }
+
+    if (current.type === 'dragging-node') {
+      updateDragPointer(event);
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      const rect = viewport.getBoundingClientRect();
+      const px = event.clientX - rect.left;
+      const py = event.clientY - rect.top;
+      const overRootZone = isPointInRootZone(px, py);
+      const world = screenToWorld(event.clientX, event.clientY, rect, transformRef.current);
+      const target = overRootZone ? null : hitTest(world, current.nodeId);
+      setInteraction((prev) =>
+        prev.type === 'dragging-node'
+          ? { ...prev, targetParentId: target, overRootZone }
+          : prev,
+      );
     }
   }
 
@@ -196,7 +347,28 @@ export default function FormulaTreeCanvas({
     if (viewport && viewport.hasPointerCapture(event.pointerId)) {
       viewport.releasePointerCapture(event.pointerId);
     }
-    setInteraction({ type: 'idle' });
+
+    if (current.type === 'pending-node-drag') {
+      onSelect(current.nodeId);
+      setInteraction({ type: 'idle' });
+      return;
+    }
+
+    if (current.type === 'dragging-node') {
+      const dropWorld = dragPointer?.world;
+      setDragPointer(null);
+      setInteraction({ type: 'idle' });
+      if (!dropWorld) return;
+      if (!current.overRootZone && current.targetParentId === null) return; // 空白区域取消
+      const target = current.overRootZone ? null : current.targetParentId;
+      if (target === current.nodeId) return;
+      commitMove(current.nodeId, target);
+      return;
+    }
+
+    if (current.type === 'panning') {
+      setInteraction({ type: 'idle' });
+    }
   }
 
   return (
@@ -220,6 +392,13 @@ export default function FormulaTreeCanvas({
         <button type="button" onClick={locateSelected} disabled={selectedFormulaId === null}>
           定位选中节点
         </button>
+      </div>
+      <div
+        ref={rootZoneRef}
+        className={`formula-canvas-root-zone${interaction.type === 'dragging-node' ? ' visible' : ''}${interaction.type === 'dragging-node' && interaction.overRootZone ? ' active' : ''}`}
+        aria-hidden="true"
+      >
+        拖到这里，提升为根节点
       </div>
       <div
         className="formula-canvas-world"
@@ -253,6 +432,21 @@ export default function FormulaTreeCanvas({
               />
             );
           })}
+          {interaction.type === 'dragging-node' &&
+            interaction.targetParentId !== null &&
+            !interaction.overRootZone &&
+            dragPointer &&
+            (() => {
+              const target = itemsById.get(interaction.targetParentId);
+              if (!target) return null;
+              const midY = (dragPointer.world.y + target.y) / 2;
+              return (
+                <path
+                  className="formula-graph-drag-preview"
+                  d={`M ${dragPointer.world.x} ${dragPointer.world.y} C ${dragPointer.world.x} ${midY}, ${target.x} ${midY}, ${target.x} ${target.y}`}
+                />
+              );
+            })()}
         </svg>
         <div className="formula-graph-nodes" role="tree" aria-label="国策树习惯节点">
           {layout.map((item) => {
@@ -261,20 +455,36 @@ export default function FormulaTreeCanvas({
               <button
                 key={item.node.id}
                 type="button"
-                className={`formula-graph-node${item.node.status === 'active' ? ' active' : ''}${item.depth === 0 ? ' root' : ''}${isSelected ? ' selected' : ''}`}
+                className={`formula-graph-node${item.node.status === 'active' ? ' active' : ''}${item.depth === 0 ? ' root' : ''}${isSelected ? ' selected' : ''}${interaction.type === 'dragging-node' && interaction.nodeId === item.node.id ? ' is-dragging' : ''}${interaction.type === 'dragging-node' && interaction.targetParentId === item.node.id ? ' is-drop-target' : ''}`}
                 style={{ left: item.x, top: item.y, width: item.width, minHeight: item.height }}
                 role="treeitem"
                 aria-level={item.depth + 1}
                 aria-selected={isSelected}
                 aria-label={`${item.node.title}，${item.node.status === 'active' ? '已点亮' : '未点亮'}`}
                 title={item.node.title}
-                onClick={() => onSelect(item.node.id)}
+                onPointerDown={(event) => handleNodePointerDown(event, item.node.id)}
+                onClick={() => {
+                  if (!didDragRef.current) onSelect(item.node.id);
+                }}
               >
                 <span className="formula-graph-node-dot" aria-hidden="true" />
                 <span className="formula-graph-node-title">{item.node.title}</span>
               </button>
             );
           })}
+          {interaction.type === 'dragging-node' && dragPointer && (() => {
+            const moved = findFormulaNode(roots, interaction.nodeId);
+            if (!moved) return null;
+            return (
+              <div
+                className="formula-graph-node-drag-ghost"
+                style={{ left: dragPointer.world.x, top: dragPointer.world.y }}
+              >
+                <span className="formula-graph-node-dot" aria-hidden="true" />
+                <span className="formula-graph-node-title">{moved.title}</span>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

@@ -2491,6 +2491,84 @@ textarea,
   font-family: var(--font-mono);
 }
 
+.formula-canvas-root-zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border-bottom: 1px dashed var(--border-hover);
+  font-size: 12px;
+  z-index: 4;
+}
+
+.formula-canvas-root-zone.visible {
+  display: flex;
+}
+
+.formula-canvas-root-zone.active {
+  color: var(--gold);
+  border-color: var(--gold-border);
+  background: var(--gold-subtle);
+}
+
+.formula-graph-node.is-dragging {
+  opacity: 0.35;
+}
+
+.formula-graph-node.is-drop-target {
+  border-color: var(--gold);
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.formula-graph-drag-preview {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.formula-graph-node-drag-ghost {
+  position: absolute;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  color: var(--text-primary);
+  background: var(--gold-subtle);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+
+.formula-graph-node.flash-new {
+  animation: formula-node-flash 1s ease-out;
+}
+
+@keyframes formula-node-flash {
+  0% {
+    box-shadow: 0 0 0 3px var(--gold);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
 .formula-graph-edges,
 .formula-graph-nodes {
   position: absolute;
