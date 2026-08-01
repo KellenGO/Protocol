@@ -4723,6 +4723,7 @@ struct TreeNodeSource {
     old_parent_node_id: Option<i64>,
     old_sibling_order: i64,
     policy_id: i64,
+    status: String,
 }
 
 fn load_tree_node_source(
@@ -4730,13 +4731,14 @@ fn load_tree_node_source(
     node_id: i64,
 ) -> Result<TreeNodeSource, String> {
     conn.query_row(
-        "SELECT parent_node_id, sibling_order, policy_id FROM policy_tree_nodes WHERE id = ?1",
+        "SELECT parent_node_id, sibling_order, policy_id, status FROM policy_tree_nodes WHERE id = ?1",
         [node_id],
         |row| {
             Ok(TreeNodeSource {
                 old_parent_node_id: row.get(0)?,
                 old_sibling_order: row.get(1)?,
                 policy_id: row.get(2)?,
+                status: row.get(3)?,
             })
         },
     )
@@ -5275,6 +5277,46 @@ fn extinguish_policy_core(
         .unwrap_or_else(|| "用户裁定该国策当前熄灭".to_string());
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // 已经熄灭 → 只更新最近一次熄灭事件的原因和周期原因（不产生新事件）
+    if source.status == "extinguished" {
+        let event_id: i64 = tx
+            .query_row(
+                "SELECT id FROM policy_events
+                 WHERE policy_id = ?1 AND event_type = 'extinguished'
+                 ORDER BY id DESC LIMIT 1",
+                [source.policy_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "未找到熄灭事件".to_string())?;
+        tx.execute(
+            "UPDATE policy_events SET reason = ?2 WHERE id = ?1",
+            rusqlite::params![event_id, clean_reason],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let cycle_id: i64 = tx
+            .query_row(
+                "SELECT id FROM policy_cycles
+                 WHERE tree_node_id = ?1 AND ended_at IS NOT NULL
+                 ORDER BY id DESC LIMIT 1",
+                [node_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "未找到已结束的周期".to_string())?;
+        tx.execute(
+            "UPDATE policy_cycles SET end_reason = ?2 WHERE id = ?1",
+            rusqlite::params![cycle_id, clean_reason],
+        )
+        .map_err(|e| e.to_string())?;
+
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(serde_json::json!({
+            "event_id": event_id,
+            "cycle_id": cycle_id,
+        }));
+    }
+
     tx.execute(
         "UPDATE policy_tree_nodes SET status = 'extinguished' WHERE id = ?1",
         [node_id],
@@ -5289,6 +5331,7 @@ fn extinguish_policy_core(
         ],
     )
     .map_err(|e| e.to_string())?;
+    let event_id = tx.last_insert_rowid();
 
     let open_cycle: Option<i64> = tx
         .query_row(
@@ -5316,7 +5359,10 @@ fn extinguish_policy_core(
     };
     tx.commit().map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({ "cycle": get_cycle_json(conn, cycle_id)? }))
+    Ok(serde_json::json!({
+        "event_id": event_id,
+        "cycle_id": cycle_id,
+    }))
 }
 
 fn permanently_delete_policy_core(
@@ -5606,6 +5652,18 @@ fn undo_extinguish_core(conn: &mut rusqlite::Connection, node_id: i64) -> Result
     let source = load_tree_node_source(conn, node_id)?;
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // 删除最近一次熄灭事件（撤销后不计入历史）
+    tx.execute(
+        "DELETE FROM policy_events
+         WHERE policy_id = ?1 AND event_type = 'extinguished'
+         AND id = (SELECT id FROM policy_events
+                   WHERE policy_id = ?1 AND event_type = 'extinguished'
+                   ORDER BY id DESC LIMIT 1)",
+        [source.policy_id],
+    )
+    .map_err(|e| e.to_string())?;
+
     tx.execute(
         "UPDATE policy_tree_nodes SET status = 'lit' WHERE id = ?1",
         [node_id],
@@ -5628,23 +5686,8 @@ fn undo_extinguish_core(conn: &mut rusqlite::Connection, node_id: i64) -> Result
             [cycle_id],
         )
         .map_err(|e| e.to_string())?;
-    } else {
-        tx.execute(
-            "INSERT INTO policy_cycles (policy_id, tree_node_id) VALUES (?1, ?2)",
-            rusqlite::params![source.policy_id, node_id],
-        )
-        .map_err(|e| e.to_string())?;
     }
-
-    tx.execute(
-        "INSERT INTO policy_events (policy_id, event_type, reason, metadata) VALUES (?1, 'lit', ?2, ?3)",
-        rusqlite::params![
-            source.policy_id,
-            "撤销熄灭，国策重新点亮",
-            serde_json::json!({ "tree_node_id": node_id }).to_string()
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+    // 不创建 lit 事件——撤销应不留痕迹
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -6702,8 +6745,19 @@ mod tests {
 
         let result =
             extinguish_policy_core(&mut conn, node_id, Some("执行失败".to_string())).unwrap();
-        assert_eq!(result["cycle"]["end_reason"].as_str(), Some("执行失败"));
-        assert!(result["cycle"]["ended_at"].as_str().is_some());
+        assert!(result["event_id"].as_i64().is_some());
+        let cycle_id = result["cycle_id"].as_i64().unwrap();
+        assert!(cycle_id > 0);
+
+        // 验证周期原因已写入
+        let end_reason: String = conn
+            .query_row(
+                "SELECT end_reason FROM policy_cycles WHERE id = ?1",
+                [cycle_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(end_reason, "执行失败");
 
         let status: String = conn
             .query_row(
@@ -6720,6 +6774,24 @@ mod tests {
                 .iter()
                 .any(|event| event["event_type"].as_str() == Some("extinguished"))
         );
+
+        // 补充原因：再次熄灭同一节点 → 不产生新事件，只更新原因
+        let result2 =
+            extinguish_policy_core(&mut conn, node_id, Some("补充原因".to_string())).unwrap();
+        // 返回同一个 event_id
+        assert_eq!(result["event_id"].as_i64(), result2["event_id"].as_i64());
+        // 事件数不变
+        let events_after = get_policy_events_core(&conn, policy_id, None).unwrap();
+        assert_eq!(events.len(), events_after.len());
+        // 原因已更新
+        let updated_reason: String = conn
+            .query_row(
+                "SELECT end_reason FROM policy_cycles WHERE id = ?1",
+                [cycle_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(updated_reason, "补充原因");
     }
 
     #[test]

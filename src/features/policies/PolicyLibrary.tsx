@@ -38,7 +38,7 @@ export default function PolicyLibrary() {
 
   // 加入国策树弹窗
   const [addTarget, setAddTarget] = useState<PolicyWithTreeStatus | null>(null);
-  const [parentNodeId, setParentNodeId] = useState<number | null>(null);
+  const [parentNodeId, setParentNodeId] = useState<number | null | undefined>(undefined);
 
   // 永久删除确认弹窗
   const [deleteTarget, setDeleteTarget] = useState<PolicyWithTreeStatus | null>(null);
@@ -124,11 +124,11 @@ export default function PolicyLibrary() {
   }
 
   async function handleAddToTree() {
-    if (!addTarget) return;
+    if (!addTarget || parentNodeId === undefined) return;
     setBusy(true);
     setActionError('');
     try {
-      await addPolicyToTree({ policyId: addTarget.id, parentNodeId });
+      await addPolicyToTree({ policyId: addTarget.id, parentNodeId: parentNodeId });
       await reload();
       setAddTarget(null);
       setParentNodeId(null);
@@ -280,7 +280,7 @@ export default function PolicyLibrary() {
                     disabled={busy}
                     onClick={() => {
                       setAddTarget(p);
-                      setParentNodeId(null);
+                      setParentNodeId(undefined);
                       setActionError('');
                     }}
                   >
@@ -322,7 +322,7 @@ export default function PolicyLibrary() {
           roots={fullTree}
           breadcrumb={(id) => breadcrumb(fullTree, id)}
           busy={busy}
-          onCancel={() => { setAddTarget(null); setParentNodeId(null); }}
+          onCancel={() => { setAddTarget(null); setParentNodeId(undefined); }}
           onConfirm={() => handleAddToTree()}
           parentNodeId={parentNodeId}
           setParentNodeId={setParentNodeId}
@@ -393,7 +393,7 @@ function AddToTreeModal({
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
-  parentNodeId: number | null;
+  parentNodeId: number | null | undefined;
   setParentNodeId: (id: number | null) => void;
 }) {
   const [treeSearch, setTreeSearch] = useState('');
@@ -429,7 +429,8 @@ function AddToTreeModal({
     setExpandedIds(toExpand);
   }, [roots, expandedIds]);
 
-  const selectedPath = parentNodeId !== null ? breadcrumb(parentNodeId) : '根节点';
+  const selectedPath = parentNodeId != null ? breadcrumb(parentNodeId) : null;
+  const notYetChosen = parentNodeId === undefined;
 
   return (
     <div className="policy-modal-overlay" onClick={() => !busy && onCancel()}>
@@ -442,7 +443,11 @@ function AddToTreeModal({
       >
         <h3>选择父国策</h3>
         <p className="policy-modal-subtitle">
-          「{target.name}」将成为「{parentNodeId === null ? '根节点' : selectedPath}」的子国策
+          {notYetChosen
+            ? '请选择一个父国策，或选"作为新的根节点"'
+            : parentNodeId === null
+              ? `「${target.name}」将作为新的根节点加入`
+              : `「${target.name}」将成为「${selectedPath}」的子国策`}
         </p>
 
         <input
@@ -478,8 +483,8 @@ function AddToTreeModal({
               key={root.node.id}
               node={root}
               depth={0}
-              selectedId={parentNodeId}
-              onSelect={setParentNodeId}
+              selectedId={parentNodeId ?? null}
+              onSelect={(id) => setParentNodeId(id)}
               expandedIds={expandedIds}
               onToggleExpand={toggleExpand}
               searchKeyword={treeSearch.trim().toLowerCase()}
@@ -491,7 +496,7 @@ function AddToTreeModal({
           <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
             取消
           </button>
-          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy || notYetChosen}>
             加入并点亮
           </button>
         </div>
