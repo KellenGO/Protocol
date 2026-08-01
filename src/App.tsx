@@ -9,6 +9,7 @@ import AuxiliarySessionPage from './pages/AuxiliarySession';
 import FocusSessionPage from './pages/FocusSession';
 import History from './pages/History';
 import Policies from './pages/Policies';
+import { PolicyProvider } from './features/policies/PolicyProvider';
 import PoliciesTree from './pages/PoliciesTree';
 import PoliciesLibrary from './pages/PoliciesLibrary';
 import PoliciesReview from './pages/PoliciesReview';
@@ -29,7 +30,14 @@ export default function App() {
             <Route path="/chains/:id/focus" element={<FocusSessionPage />} />
             <Route path="/history" element={<History />} />
             <Route path="/review" element={<Navigate to="/?view=chains" replace />} />
-            <Route path="/policies" element={<Policies />}>
+            <Route
+              path="/policies"
+              element={
+                <PolicyProvider>
+                  <Policies />
+                </PolicyProvider>
+              }
+            >
               <Route index element={<Navigate to="tree" replace />} />
               <Route path="tree" element={<PoliciesTree />} />
               <Route path="library" element={<PoliciesLibrary />} />
